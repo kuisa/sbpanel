@@ -1,0 +1,26 @@
+# 本地配置与面板自动备份（不要提交）
+config.json
+test-config.json
+*.bak.*
+.panel-*.tmp
+
+# Go 构建时从 node/ 拷进来的前端（源只在 node/）
+go/panel.html
+go/setup.html
+
+# 本地构建产物（dist/ 里的正式发布二进制要提交，所以这里不忽略 dist/）
+go/sbpanel
+go/singbox-panel
+/sbpanel
+*.exe
+node_modules/
+
+# 打包产物
+*.tar.gz
+*.zip
+
+# 编辑器 / 系统
+.DS_Store
+.vscode/
+.idea/
+*.swp
