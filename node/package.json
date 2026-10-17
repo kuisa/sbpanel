@@ -1,0 +1,14 @@
+{
+  "name": "singbox-panel",
+  "version": "1.0.0",
+  "private": true,
+  "description": "sing-box 控制面板：启动/停止/热重载、config.json 可视化编辑、入站→出站绑定与链式(detour)、CPU/内存/磁盘/出口IP 监控。零依赖。",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {}
+}

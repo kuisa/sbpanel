@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>sbpanel 首次设置</title>
+<style>
+:root{--bg:#0b1220;--panel:#121b2e;--line:#233252;--fg:#e7eefc;--mut:#8ba0c4;--acc:#3b82f6;--ok:#22c55e;--bad:#ef4444}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,#0b1220,#0e1730 60%,#0b1220);color:var(--fg);
+font:14px/1.6 Inter,system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans SC",sans-serif;padding:20px}
+.box{width:100%;max-width:460px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:26px}
+h1{font-size:18px;margin:0 0 6px}
+p.s{color:var(--mut);font-size:13px;margin:0 0 20px}
+label{display:block;color:var(--mut);font-size:12px;margin:14px 0 4px}
+input{width:100%;background:#0c1424;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:14px;font-family:inherit}
+input:focus{outline:none;border-color:var(--acc)}
+button{width:100%;margin-top:20px;padding:11px;border:none;border-radius:8px;background:linear-gradient(135deg,#2563eb,#3b82f6);color:#fff;font-size:15px;font-weight:600;cursor:pointer}
+button:disabled{opacity:.6;cursor:default}
+.msg{margin-top:14px;font-size:13px;padding:10px 12px;border-radius:8px;display:none}
+.msg.err{display:block;background:rgba(239,68,68,.12);border:1px solid #6b2222;color:#ffc9c9}
+.msg.ok{display:block;background:rgba(34,197,94,.12);border:1px solid #1c5f36;color:#8ff0b0}
+.hint{color:var(--mut);font-size:12px;margin-top:16px;border-top:1px solid var(--line);padding-top:14px}
+code{background:#0c1424;border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:12px}
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>设置面板账号</h1>
+  <p class="s">这是第一次打开面板，先设一个账号和密码。设置完成后会用这个账号登录。</p>
+  <form id="f" onsubmit="return false;">
+    <label>用户名</label>
+    <input id="user" value="admin" autocomplete="username" autofocus>
+    <label>密码（至少 6 位，建议 10 位以上）</label>
+    <input id="pass" type="password" autocomplete="new-password">
+    <label>再输一次密码</label>
+    <input id="pass2" type="password" autocomplete="new-password">
+    <button id="btn" onclick="submitForm()">设置并进入面板</button>
+  </form>
+  <div class="msg" id="msg"></div>
+  <div class="hint">
+    账号信息以 PBKDF2-SHA256 加盐哈希保存在 <code>/etc/sbpanel-auth.json</code>（权限 600），不会明文落盘。<br>
+    想改账号密码：登录后在面板里点右上角「账号」；或直接编辑该文件后重启面板。
+  </div>
+</div>
+<script>
+function say(t, ok){ const m = document.getElementById('msg'); m.className = 'msg ' + (ok ? 'ok' : 'err'); m.textContent = t; }
+async function submitForm(){
+  const user = document.getElementById('user').value.trim();
+  const pass = document.getElementById('pass').value;
+  const pass2 = document.getElementById('pass2').value;
+  if (user.length < 2) return say('用户名至少 2 个字符');
+  if (pass.length < 6) return say('密码至少 6 位');
+  if (pass !== pass2) return say('两次输入的密码不一致');
+  document.getElementById('btn').disabled = true;
+  try{
+    const r = await fetch('/api/setup', {method:'POST', headers:{'content-type':'application/json'},
+      body: JSON.stringify({user, password: pass})});
+    const j = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    say('设置成功，正在进入面板…', true);
+    setTimeout(()=>{ location.href = '/'; }, 700);
+  }catch(e){
+    say(e.message);
+    document.getElementById('btn').disabled = false;
+  }
+}
+document.getElementById('pass2').addEventListener('keydown', e=>{ if(e.key === 'Enter') submitForm(); });
+</script>
+</body>
+</html>

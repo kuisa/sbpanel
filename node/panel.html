@@ -1,0 +1,1012 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>sing-box 控制面板</title>
+<style>
+:root{--bg:#0b1220;--panel:#121b2e;--panel2:#17233b;--line:#233252;--fg:#e7eefc;--mut:#8ba0c4;--acc:#3b82f6;--ok:#22c55e;--warn:#f59e0b;--bad:#ef4444;--in:#38bdf8;--out:#a78bfa;}
+*{box-sizing:border-box}
+body{margin:0;background:linear-gradient(180deg,#0b1220,#0e1730 60%,#0b1220);color:var(--fg);font:14px/1.5 Inter,system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans SC",sans-serif}
+header{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line);background:rgba(9,14,26,.8);position:sticky;top:0;z-index:20;backdrop-filter:blur(8px)}
+h1{font-size:16px;margin:0 12px 0 0;letter-spacing:.5px}
+.pill{padding:3px 10px;border-radius:999px;font-size:12px;border:1px solid var(--line);background:var(--panel2)}
+.pill.ok{background:rgba(34,197,94,.15);border-color:#1c5f36;color:#8ff0b0}
+.pill.bad{background:rgba(239,68,68,.15);border-color:#6b2222;color:#ffb4b4}
+.pill.warn{background:rgba(245,158,11,.15);border-color:#6b4a12;color:#ffd79a}
+.spacer{flex:1}
+button{cursor:pointer;background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:7px 12px;font-size:13px}
+button:hover{border-color:#33507f;background:#1b2a48}
+button.primary{background:linear-gradient(135deg,#2563eb,#3b82f6);border-color:#2f5fd0}
+button.danger{background:rgba(239,68,68,.15);border-color:#6b2222;color:#ffc9c9}
+button.ghost{background:transparent}
+button.mini{padding:3px 8px;font-size:12px;border-radius:6px}
+main{padding:16px 18px 60px;max-width:1400px;margin:0 auto}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+.card .k{color:var(--mut);font-size:12px;letter-spacing:.4px;text-transform:uppercase}
+.card .v{font-size:24px;font-weight:650;margin-top:6px;font-variant-numeric:tabular-nums}
+.card .s{color:var(--mut);font-size:12px;margin-top:4px}
+.bar{height:6px;border-radius:4px;background:#1d2b47;overflow:hidden;margin-top:10px}
+.bar>i{display:block;height:100%;background:linear-gradient(90deg,#22c55e,#eab308,#ef4444);width:0}
+.tabs{display:flex;gap:6px;margin:18px 0 12px;flex-wrap:wrap}
+.tabs button{border-radius:999px;padding:6px 14px}
+.tabs button.on{background:var(--acc);border-color:var(--acc);color:#fff}
+.pane{display:none}.pane.on{display:block}
+.list{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:10px}
+.item{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+.item h3{margin:0 0 6px;font-size:14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.tag{font-family:ui-monospace,Menlo,Consolas,monospace;color:var(--fg)}
+.meta{color:var(--mut);font-size:12px;font-variant-numeric:tabular-nums}
+.kv{color:var(--mut);font-size:12px;font-family:ui-monospace,Menlo,Consolas,monospace;word-break:break-all}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px}
+select,input,textarea{background:#0c1424;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:13px;font-family:inherit}
+input[type=checkbox]{width:16px;height:16px;accent-color:var(--acc)}
+textarea{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.55;width:100%;min-height:240px;white-space:pre;tab-size:2}
+pre{background:#0c1424;border:1px solid var(--line);border-radius:10px;padding:12px;overflow:auto;max-height:520px;font-size:12.5px;margin:0}
+.graph-wrap{position:relative;display:grid;grid-template-columns:1fr 1fr;gap:120px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px}
+.graph-wrap svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+.gcol{display:flex;flex-direction:column;gap:10px;min-width:0}
+.gcol .gh{color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:2px}
+.node{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;position:relative;z-index:2}
+.node.in{border-left:3px solid var(--in)}
+.node.out{border-right:3px solid var(--out)}
+.node.err{border-color:#6b2222;background:rgba(239,68,68,.08)}
+.node.dim{opacity:.55}
+.node .t{font-weight:600}
+.node .m{color:var(--mut);font-size:12px;font-family:ui-monospace,Menlo,Consolas,monospace;word-break:break-all}
+.hint{color:var(--mut);font-size:12px;margin-top:12px}
+.modal{position:fixed;inset:0;background:rgba(4,8,16,.72);display:none;align-items:flex-start;justify-content:center;padding:24px 16px;z-index:50;overflow:auto}
+.modal.on{display:flex}
+.modal .box{background:var(--panel);border:1px solid var(--line);border-radius:12px;max-width:900px;width:100%;max-height:92vh;overflow:auto;padding:16px}
+.modal h3{margin:0}
+.seg{display:flex;gap:6px;margin:12px 0}
+.seg button{border-radius:8px}
+.seg button.on{background:var(--acc);border-color:var(--acc);color:#fff}
+.fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px}
+.f{display:flex;flex-direction:column;gap:4px;min-width:0}
+.f label{color:var(--mut);font-size:12px}
+.f .in{display:flex;gap:6px;align-items:center;justify-content:flex-start}
+.f .in>input:not([type=checkbox]):not([type=radio]),.f .in>select{flex:1;min-width:0}
+.f .in>input[type=checkbox]{flex:0 0 auto;width:16px;height:16px;margin:0}
+.f label,.f .fd{text-align:left}
+.fd{color:#6f86ab;font-size:11.5px;font-weight:400;margin-left:6px}
+.sect{margin:14px 0 6px;color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.6px;border-top:1px solid var(--line);padding-top:10px}
+.users{border:1px solid var(--line);border-radius:10px;padding:10px;background:#0f1728}
+.urow{display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap}
+.urow input{flex:1;min-width:120px}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+.toast{position:fixed;right:18px;bottom:18px;display:flex;flex-direction:column;gap:8px;z-index:60}
+.toast div{background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--acc);border-radius:8px;padding:10px 14px;max-width:460px;box-shadow:0 8px 30px rgba(0,0,0,.4);white-space:pre-wrap}
+.toast div.ok{border-left-color:var(--ok)}.toast div.bad{border-left-color:var(--bad)}
+code{background:#0c1424;border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-size:12.5px}
+</style>
+</head>
+<body>
+<header>
+  <h1>sing-box 控制面板</h1>
+  <span class="pill" id="svcPill">状态未知</span>
+  <span class="pill" id="verPill">版本 -</span>
+  <span class="spacer"></span>
+  <button onclick="svc('start')">启动</button>
+  <button onclick="svc('stop')" class="danger">停止</button>
+  <button onclick="svc('restart')">重启</button>
+  <button onclick="svc('reload')" class="ghost">热重载</button>
+  <button onclick="checkCfg()">配置检查</button>
+  <button onclick="accountDialog()">账号</button>
+</header>
+
+<main>
+  <div class="grid">
+    <div class="card"><div class="k">CPU</div><div class="v" id="cpu">-</div><div class="s" id="cpuSub">-</div><div class="bar"><i id="cpuBar"></i></div></div>
+    <div class="card"><div class="k">内存</div><div class="v" id="mem">-</div><div class="s" id="memSub">-</div><div class="bar"><i id="memBar"></i></div></div>
+    <div class="card"><div class="k">存储 (/)</div><div class="v" id="disk">-</div><div class="s" id="diskSub">-</div><div class="bar"><i id="diskBar"></i></div></div>
+    <div class="card"><div class="k">出口 IP</div><div class="v" id="ip" style="font-size:20px">-</div><div class="s" id="ipSub">-</div></div>
+    <div class="card"><div class="k">主机</div><div class="v" id="host" style="font-size:18px">-</div><div class="s" id="hostSub">-</div></div>
+  </div>
+
+  <div class="tabs">
+    <button class="on" data-t="graph">拓扑 / 链路</button>
+    <button data-t="in">入站</button>
+    <button data-t="out">出站</button>
+    <button data-t="raw">原始 JSON</button>
+    <button data-t="log">日志</button>
+  </div>
+
+  <section class="pane on" id="pane-graph">
+    <div class="row"><button onclick="loadConfig()">刷新</button><span class="meta" id="cfginfo"></span></div>
+    <div class="graph-wrap" style="margin-top:10px">
+      <svg id="svg"></svg>
+      <div class="gcol"><div class="gh">入站 Inbounds</div><div id="colIn" style="display:flex;flex-direction:column;gap:10px"></div></div>
+      <div class="gcol"><div class="gh">出站 Outbounds</div><div id="colOut" style="display:flex;flex-direction:column;gap:10px"></div></div>
+    </div>
+    <div class="hint">蓝线 = 入站 → 出站的绑定（写入 <code>route.rules</code>）；紫线 = 出站链式 <code>detour</code>（A 经 B 出去）。带红框的入站尚未绑定出站，灰色出站当前没有任何引用。</div>
+  </section>
+
+  <section class="pane" id="pane-in">
+    <div class="row"><button onclick="openNew('inbound')">＋ 新建入站</button><button onclick="loadConfig()">刷新</button></div>
+    <div class="list" id="listIn" style="margin-top:10px"></div>
+  </section>
+
+  <section class="pane" id="pane-out">
+    <div class="row"><button onclick="openNew('outbound')">＋ 新建出站</button><button onclick="loadConfig()">刷新</button></div>
+    <div class="list" id="listOut" style="margin-top:10px"></div>
+  </section>
+
+  <section class="pane" id="pane-raw">
+    <div class="row">
+      <button class="primary" onclick="saveRaw()">保存配置</button>
+      <button onclick="fmtRaw()">格式化</button>
+      <button onclick="loadConfig(true)">重新载入</button>
+      <span class="spacer"></span>
+      <button onclick="location.href='/api/export'">导出到文件</button>
+      <button onclick="document.getElementById('importFile').click()">导入配置文件</button>
+      <button onclick="toggleBackups()">备份 / 恢复</button>
+      <input type="file" id="importFile" accept=".json,application/json" style="display:none" onchange="importConfig(this)">
+      <span class="meta" id="rawinfo"></span>
+    </div>
+    <div id="backupBox" style="display:none;margin-top:12px"></div>
+    <textarea id="raw" spellcheck="false" style="margin-top:10px;min-height:460px"></textarea>
+  </section>
+
+  <section class="pane" id="pane-log">
+    <div class="row"><button onclick="loadLog()">刷新</button><span class="meta">来源：journalctl / 日志文件</span></div>
+    <pre id="logbox" style="margin-top:10px">…</pre>
+  </section>
+</main>
+
+<div class="modal" id="modal"><div class="box">
+  <div class="row" style="justify-content:space-between">
+    <h3 id="mTitle">编辑</h3>
+    <div class="f" style="flex-direction:row;align-items:center;gap:8px">
+      <label style="white-space:nowrap">协议类型</label>
+      <select id="mType" onchange="switchType(this.value)"></select>
+    </div>
+  </div>
+  <div id="mPresets" class="row" style="margin:10px 0 0"></div>
+  <div class="seg">
+    <button class="on" id="segForm" onclick="setSeg('form')">表单</button>
+    <button id="segJson" onclick="setSeg('json')">JSON（高级）</button>
+    <span class="spacer"></span>
+    <button class="mini ghost" onclick="certTools()">证书工具…</button>
+  </div>
+  <div id="mFormWrap"><div class="fields" id="mForm"></div>
+    <div class="sect" id="mUsersSect" style="display:none">用户 / 凭证（每个用户一组）</div>
+    <div id="mUsers" class="users" style="display:none"></div>
+  </div>
+  <textarea id="mJson" spellcheck="false" style="display:none"></textarea>
+  <div class="toolbar">
+    <button class="primary" onclick="saveObj()">保存</button>
+    <button onclick="closeModal()">取消</button>
+    <span class="meta" id="mNote"></span>
+  </div>
+</div></div>
+<div class="modal" id="acct"><div class="box" style="max-width:460px">
+  <h3>面板账号</h3>
+  <div class="fields" style="grid-template-columns:1fr">
+    <div class="f"><label>当前密码</label><input id="ac_old" type="password" autocomplete="current-password"></div>
+    <div class="f"><label>用户名</label><input id="ac_user" autocomplete="username"></div>
+    <div class="f"><label>新密码（至少 6 位）</label><input id="ac_pass" type="password" autocomplete="new-password"></div>
+    <div class="f"><label>再输一次新密码</label><input id="ac_pass2" type="password" autocomplete="new-password"></div>
+  </div>
+  <div class="toolbar">
+    <button class="primary" onclick="saveAccount()">保存</button>
+    <button onclick="closeAcct()">取消</button>
+    <span class="meta" id="ac_note"></span>
+  </div>
+</div></div>
+<div class="toast" id="toast"></div>
+<script>
+const $ = s => document.querySelector(s);
+const state = { config:null, graph:null, editing:null, certs:null, seg:'form' };
+const PROTO_ICON = { mixed:'🔀', socks:'🧦', http:'🌐', tun:'🛡️', vless:'⚡', vmess:'📦', trojan:'🐴', shadowsocks:'🌫️', hysteria2:'🚀', tuic:'🛞', direct:'➡️', block:'⛔', wireguard:'🔒' };
+
+function toast(msg, kind){
+  const d = document.createElement('div');
+  d.className = kind || ''; d.textContent = msg;
+  $('#toast').appendChild(d);
+  setTimeout(()=>d.remove(), kind==='bad'?9000:4500);
+}
+/* ---------------- 配置导入导出 / 备份恢复 ---------------- */
+async function importConfig(input){
+  const f = input.files && input.files[0];
+  input.value = '';
+  if(!f) return;
+  try{
+    const text = await f.text();
+    JSON.parse(text);                       // 先本地校验一下，避免把语法错误推上去
+    if(!confirm('导入 '+f.name+' 并覆盖当前配置？\n（当前配置会自动备份）')) return;
+    const r = await api('/api/config',{method:'PUT',body:JSON.stringify({raw:text})});
+    toast('已导入 '+f.name,'ok'); afterWrite(r); loadConfig();
+  }catch(e){ toast('导入失败: '+e.message,'bad'); }
+}
+async function toggleBackups(){
+  const box = $('#backupBox');
+  if(box.style.display !== 'none'){ box.style.display = 'none'; return; }
+  await loadBackups();
+  box.style.display = '';
+}
+async function loadBackups(){
+  try{
+    const r = await api('/api/backups');
+    const rows = (r.files||[]).map(f=>`<div class="urow">
+        <span class="kv" style="flex:1">${esc(f.name)}</span>
+        <span class="meta">${(f.size/1024).toFixed(1)} KB · ${esc(f.mtime)}</span>
+        <button class="mini" onclick="restoreBackup('${esc(f.name)}')">恢复</button></div>`).join('');
+    $('#backupBox').innerHTML = `<div class="sect">自动备份（共 ${r.count||0} 个，目录 ${esc(r.dir||'')}）</div>`
+      + (rows || '<div class="meta">还没有备份。每次保存/绑定/编辑都会自动留一份。</div>')
+      + `<div class="row"><button class="mini ghost" onclick="loadBackups()">刷新</button>
+         <span class="meta">恢复前会先把当前配置另存一份</span></div>`;
+  }catch(e){ $('#backupBox').innerHTML = '<div class="meta">读取失败: '+esc(e.message)+'</div>'; }
+}
+async function restoreBackup(name){
+  if(!confirm('用备份覆盖当前配置？\n'+name)) return;
+  try{
+    const r = await api('/api/config/restore',{method:'POST',body:JSON.stringify({file:name})});
+    toast(r.msg||'已恢复','ok'); loadConfig(); loadBackups();
+  }catch(e){ toast(e.message,'bad'); }
+}
+
+/* ---------------- 面板账号 ---------------- */
+async function accountDialog(){
+  try{
+    const st = await api('/api/auth/state');
+    if(st.source === 'env'){
+      toast('当前账号来自环境变量（PANEL_USER / PANEL_PASSWORD）。\n要改请编辑 /etc/sbpanel.env 里的这两项，然后：systemctl restart sbpanel','ok');
+      return;
+    }
+    $('#ac_user').value = st.user || 'admin';
+    $('#ac_old').value = $('#ac_pass').value = $('#ac_pass2').value = '';
+    $('#ac_note').textContent = '账号存在 /etc/sbpanel-auth.json（PBKDF2 加盐哈希）';
+    $('#acct').classList.add('on');
+  }catch(e){ toast(e.message,'bad'); }
+}
+function closeAcct(){ $('#acct').classList.remove('on'); }
+async function saveAccount(){
+  const oldPass = $('#ac_old').value, user = $('#ac_user').value.trim();
+  const pass = $('#ac_pass').value, pass2 = $('#ac_pass2').value;
+  if(pass.length < 6) return toast('新密码至少 6 位','bad');
+  if(pass !== pass2) return toast('两次输入的新密码不一致','bad');
+  try{
+    const r = await api('/api/auth/change',{method:'POST',body:JSON.stringify({old_password:oldPass, user, password:pass})});
+    toast(r.msg||'已更新','ok'); closeAcct();
+  }catch(e){ toast(e.message,'bad'); }
+}
+
+function afterWrite(r){
+  if(r && r.check && !r.check.ok){
+    toast('sing-box 拒绝了这个配置：'+ String(r.check.output||'').replace(/\s+/g,' ').slice(0,240), 'bad');
+  }
+}
+async function api(path, opts){
+  const r = await fetch(path, Object.assign({headers:{'content-type':'application/json'}}, opts||{}));
+  let j = null; try { j = await r.json(); } catch(_) {}
+  if(r.status === 401 && j && j.setup_required){ location.href = j.setup_url || '/setup'; throw new Error('需要先设置账号'); }
+  if(!r.ok){ throw new Error((j && (j.error||j.msg)) || ('HTTP '+r.status)); }
+  return j;
+}
+function fmtBytes(n){
+  if(n==null) return '-';
+  const u=['B','KB','MB','GB','TB']; let i=0, x=n;
+  while(x>=1024 && i<u.length-1){ x/=1024; i++; }
+  return x.toFixed(i?1:0)+' '+u[i];
+}
+function fmtDur(s){ const d=Math.floor(s/86400), h=Math.floor(s%86400/3600), m=Math.floor(s%3600/60); return (d?d+'天 ':'')+h+'时 '+m+'分'; }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function attr(s){ return String(s).replace(/[^a-zA-Z0-9_-]/g,'_'); }
+
+/* ---------------- 生成器 ---------------- */
+function genUuid(){
+  // crypto.randomUUID 需要安全上下文（http://IP 不是），所以自己做 v4
+  if (crypto && typeof crypto.randomUUID === 'function') { try { return crypto.randomUUID(); } catch(_){} }
+  const b = new Uint8Array(16);
+  if (crypto && crypto.getRandomValues) crypto.getRandomValues(b);
+  else for (let i=0;i<16;i++) b[i] = Math.floor(Math.random()*256);
+  b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
+  const h = [...b].map(x=>x.toString(16).padStart(2,'0')).join('');
+  return h.slice(0,8)+'-'+h.slice(8,12)+'-'+h.slice(12,16)+'-'+h.slice(16,20)+'-'+h.slice(20);
+}
+function genPass(n){ return genUuid().replace(/-/g,'').slice(0, n||16); }
+
+/* ---------------- 状态卡 ---------------- */
+async function refreshStatus(){
+  try{
+    const s = await api('/api/status');
+    $('#cpu').textContent = s.cpu.percent.toFixed(1)+'%';
+    $('#cpuBar').style.width = s.cpu.percent+'%';
+    $('#cpuSub').textContent = s.cpu.cores+' 核 · 负载 '+s.loadavg.map(x=>x.toFixed(2)).join(' / ');
+    $('#mem').textContent = s.mem.percent+'%';
+    $('#memBar').style.width = s.mem.percent+'%';
+    $('#memSub').textContent = fmtBytes(s.mem.used)+' / '+fmtBytes(s.mem.total);
+    if(s.disk){ $('#disk').textContent = s.disk.percent+'%'; $('#diskBar').style.width=Math.min(100,s.disk.percent)+'%';
+      $('#diskSub').textContent = fmtBytes(s.disk.used)+' / '+fmtBytes(s.disk.total)+' （可用 '+fmtBytes(s.disk.free)+'）'; }
+    $('#ip').textContent = s.exitIp || '获取失败';
+    $('#ipSub').textContent = s.exitIp ? ('检查于 '+new Date(s.ipCheckedAt).toLocaleTimeString()) : '网络不可达或被墙';
+    $('#host').textContent = s.hostname;
+    $('#hostSub').textContent = s.platform+' · 运行 '+fmtDur(s.uptime);
+    const p = $('#svcPill');
+    p.textContent = (s.service.running?'运行中':'已停止')+' · '+(s.service.mode==='systemd'?s.service.unit:'进程模式');
+    p.className = 'pill '+(s.service.running?'ok':'bad');
+    $('#verPill').textContent = s.service.version || '-';
+    if(!s.config.valid && s.config.exists) $('#cfginfo').textContent = '配置解析失败: '+s.config.error;
+    else $('#cfginfo').textContent = '配置: '+s.config.path;
+  }catch(e){ /* 静默重试 */ }
+}
+
+/* ---------------- 配置 / 拓扑 ---------------- */
+async function loadConfig(){
+  try{
+    const c = await api('/api/config');
+    if(!c.ok){ toast('配置读取失败: '+c.error,'bad'); $('#raw').value = c.raw||''; return; }
+    state.config = c.config; state.graph = c.graph;
+    $('#raw').value = c.raw;
+    $('#rawinfo').textContent = c.raw.length+' 字符';
+    renderGraph(); renderLists();
+  }catch(e){ toast(e.message,'bad'); }
+}
+function outOptions(sel, includeEmpty){
+  const outs = (state.graph&&state.graph.outbounds)||[];
+  return (includeEmpty?'<option value="">（不绑定）</option>':'') +
+    outs.map(o=>`<option value="${esc(o.tag)}" ${o.tag===sel?'selected':''}>${esc(o.tag)} · ${esc(o.type)}</option>`).join('');
+}
+function renderGraph(){
+  const g = state.graph; if(!g) return;
+  const colIn = $('#colIn'), colOut = $('#colOut');
+  colIn.innerHTML = g.inbounds.length ? g.inbounds.map(i=>{
+    const unbound = g.unbound.includes(i.tag);
+    const cur = (g.edges.find(e=>e.kind==='route'&&e.from===i.tag)||{}).to || '';
+    return `<div class="node in ${unbound?'err':''}" id="in-${attr(i.tag)}">
+      <div class="t">${PROTO_ICON[i.type]||''} ${esc(i.tag)}</div>
+      <div class="m">${esc(i.type)} ${i.listen?esc(i.listen):''}${i.port?':'+i.port:''}</div>
+      <div class="row"><span class="meta">出站→</span>
+        <select onchange="bind('${esc(i.tag)}', this.value)">${outOptions(cur, true)}</select></div>
+    </div>`;
+  }).join('') : '<div class="meta">没有入站</div>';
+
+  colOut.innerHTML = g.outbounds.length ? g.outbounds.map(o=>{
+    const dim = g.unused.includes(o.tag);
+    const chainable = !['direct','block','dns','selector','urltest'].includes(o.type);
+    return `<div class="node out ${dim?'dim':''}" id="out-${attr(o.tag)}">
+      <div class="t">${PROTO_ICON[o.type]||''} ${esc(o.tag)}</div>
+      <div class="m">${esc(o.type)} ${o.server?esc(o.server):''}${o.port?':'+o.port:''}${o.detour?' → '+esc(o.detour):''}</div>
+      ${chainable?`<div class="row"><span class="meta">链式经</span>
+        <select onchange="chain('${esc(o.tag)}', this.value)">${outOptions(o.detour, true)}</select></div>`:'<div class="meta" style="margin-top:4px">该类型不支持链式</div>'}
+    </div>`;
+  }).join('') : '<div class="meta">没有出站</div>';
+
+  requestAnimationFrame(drawEdges);
+}
+function drawEdges(){
+  const svg = $('#svg'), wrap = svg.parentElement;
+  const wr = wrap.getBoundingClientRect();
+  svg.setAttribute('viewBox', `0 0 ${wr.width} ${wr.height}`);
+  let h = '';
+  svg.innerHTML = `<defs>
+    <marker id="amb" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#38bdf8"/></marker>
+    <marker id="amv" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#a78bfa"/></marker>
+  </defs>`;
+  const g = state.graph; if(!g) return;
+  for(const e of g.edges){
+    if(e.kind==='route'){
+      const a = document.getElementById('in-'+attr(e.from)), b = document.getElementById('out-'+attr(e.to));
+      if(a&&b){ const ar=a.getBoundingClientRect(), br=b.getBoundingClientRect();
+        const x1=ar.right-wr.left, y1=ar.top-wr.top+ar.height/2, x2=br.left-wr.left, y2=br.top-wr.top+br.height/2;
+        const dx = Math.max(40, Math.abs(x2-x1)*0.45);
+        h += `<path d="M ${x1} ${y1} C ${x1+dx} ${y1}, ${x2-dx} ${y2}, ${x2} ${y2}" fill="none" stroke="#38bdf8" stroke-width="2" marker-end="url(#amb)"/>`; }
+    } else if(e.kind==='detour'){
+      const a = document.getElementById('out-'+attr(e.from)), b = document.getElementById('out-'+attr(e.to));
+      if(a&&b){ const ar=a.getBoundingClientRect(), br=b.getBoundingClientRect();
+        const x = Math.min(wr.width-6, ar.right-wr.left+18);
+        h += `<path d="M ${ar.right-wr.left} ${ar.top-wr.top+ar.height/2} C ${x+40} ${ar.top-wr.top+ar.height/2}, ${x+40} ${br.top-wr.top+br.height/2}, ${br.right-wr.left} ${br.top-wr.top+br.height/2}" fill="none" stroke="#a78bfa" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#amv)"/>`; }
+    }
+  }
+  svg.innerHTML += h;
+}
+window.addEventListener('resize', ()=>requestAnimationFrame(drawEdges));
+
+async function bind(inbound, outbound){
+  try{ const r = await api('/api/bind',{method:'POST',body:JSON.stringify({inbound,outbound})});
+    state.graph = r.graph; toast(outbound? `已绑定 ${inbound} → ${outbound}` : `已解除 ${inbound} 的绑定`,'ok'); afterWrite(r); renderGraph(); renderLists();
+  }catch(e){ toast(e.message,'bad'); refreshStatus(); }
+}
+async function chain(outbound, detour){
+  try{ const r = await api('/api/chain',{method:'POST',body:JSON.stringify({outbound,detour})});
+    state.graph = r.graph; toast(`已设置 ${outbound} ${detour?('经 '+detour):'取消链式'}`,'ok'); afterWrite(r); renderGraph(); renderLists();
+  }catch(e){ toast(e.message,'bad'); }
+}
+
+/* ---------------- 列表（摘要展示） ---------------- */
+function brief(kind, o){
+  const c = state.config || {};
+  const obj = ((c[kind==='inbound'?'inbounds':'outbounds'])||[]).find(x=>x.tag===o.tag) || {};
+  if(kind==='inbound'){
+    const users = Array.isArray(obj.users)? obj.users.length : 0;
+    const tls = obj.tls && obj.tls.enabled ? ' · TLS' : '';
+    return `监听 ${obj.listen||'0.0.0.0'}:${obj.listen_port||'-'}${users?(' · '+users+' 个用户'):''}${tls}`;
+  }
+  const parts = [];
+  if(obj.server) parts.push('服务器 '+(obj.server||'')+':'+(obj.server_port||'-'));
+  if(obj.tls && obj.tls.enabled) parts.push('TLS');
+  if(obj.tls && obj.tls.reality && obj.tls.reality.enabled) parts.push('Reality');
+  if(obj.transport && obj.transport.type && obj.transport.type!=='tcp') parts.push(obj.transport.type);
+  return parts.join(' · ') || '本地出站';
+}
+function renderLists(){
+  const g = state.graph; if(!g) return;
+  const cur = t => (g.edges.find(e=>e.kind==='route'&&e.from===t)||{}).to || '';
+  $('#listIn').innerHTML = g.inbounds.map(i=>`
+    <div class="item"><h3><span class="tag">${PROTO_ICON[i.type]||''} ${esc(i.tag)}</span><span class="pill">${esc(i.type)}</span></h3>
+      <div class="meta">${esc(brief('inbound', i))}</div>
+      <div class="row"><span class="meta">出站→</span><select onchange="bind('${esc(i.tag)}',this.value)">${outOptions(cur(i.tag),true)}</select></div>
+      <div class="row"><button onclick="openEdit('inbound','${esc(i.tag)}')">编辑</button>
+        <button class="danger" onclick="delObj('inbound','${esc(i.tag)}')">删除</button></div>
+    </div>`).join('') || '<div class="meta">没有入站</div>';
+
+  $('#listOut').innerHTML = g.outbounds.map(o=>`
+    <div class="item"><h3><span class="tag">${PROTO_ICON[o.type]||''} ${esc(o.tag)}</span><span class="pill">${esc(o.type)}</span></h3>
+      <div class="meta">${esc(brief('outbound', o))}</div>
+      <div class="row"><span class="meta">链式经</span><select onchange="chain('${esc(o.tag)}',this.value)">${outOptions(o.detour,true)}</select></div>
+      <div class="row"><button onclick="openEdit('outbound','${esc(o.tag)}')">编辑</button>
+        <button class="danger" onclick="delObj('outbound','${esc(o.tag)}')">删除</button></div>
+    </div>`).join('') || '<div class="meta">没有出站</div>';
+}
+async function delObj(kind, tag){
+  if(!confirm('确认删除 '+kind+' 「'+tag+'」？')) return;
+  try{ await api('/api/object?kind='+kind+'&tag='+encodeURIComponent(tag),{method:'DELETE'});
+    toast('已删除','ok'); loadConfig();
+  }catch(e){ toast(e.message,'bad'); }
+}
+
+/* ============================================================
+   协议 Schema：每个协议一条字段定义，编辑器按定义渲染输入框
+   t: text | num | bool | list | select | uuid | pass | cert | key
+   g: 字段分组（基础 / 传输 / TLS / 参数），用于表单分节
+   ============================================================ */
+const F = (k, l, t, o={}) => Object.assign({k, l, t}, o);
+const G_BASE = '基础', G_TP = '传输', G_TLS = 'TLS', G_PARAM = '参数';
+
+const TLS_IN = [
+  F('tls.enabled','启用 TLS','bool',{g:G_TLS,d:'需填证书和私钥'}),
+  F('tls.server_name','证书域名（SNI）','text',{ph:'bing.com',g:G_TLS,d:'证书上的域名，客户端要一致'}),
+  F('tls.certificate_path','证书文件','cert',{g:G_TLS,d:'选文件或点「自签」'}),
+  F('tls.key_path','私钥文件','key',{g:G_TLS,d:'与证书配套'}),
+  F('tls.alpn','ALPN 协议（逗号分隔）','list',{ph:'h3',g:G_TLS,d:'WS 用 http/1.1，hy2/tuic 用 h3'}),
+];
+const TLS_MANDATORY = [
+  F('tls.enabled','启用 TLS（该协议必需）','bool',{def:true,g:G_TLS}),
+  F('tls.server_name','证书域名（SNI）','text',{ph:'bing.com',g:G_TLS,d:'证书上的域名，客户端要一致'}),
+  F('tls.certificate_path','证书文件','cert',{g:G_TLS,d:'选文件或点「自签」'}),
+  F('tls.key_path','私钥文件','key',{g:G_TLS,d:'与证书配套'}),
+  F('tls.alpn','ALPN 协议（逗号分隔）','list',{ph:'h3',g:G_TLS,d:'WS 用 http/1.1，hy2/tuic 用 h3'}),
+];
+const REALITY_IN = [
+  F('tls.reality.enabled','启用 Reality','bool',{g:G_TLS,d:'无需证书，勾了就别填证书'}),
+  F('tls.reality.handshake.server','Reality 伪装目标','text',{ph:'www.bing.com',g:G_TLS,d:'要能访问到的真实站点'}),
+  F('tls.reality.handshake.server_port','Reality 目标端口','num',{ph:'443',g:G_TLS,d:'通常 443'}),
+  F('tls.reality.private_key','Reality 私钥（服务端）','realitykey',{g:G_TLS,d:'点右边生成，公钥给客户端'}),
+  F('tls.reality.short_id','Reality 短 ID（逗号分隔）','list',{ph:'0123abcd',g:G_TLS,d:'和客户端一致'}),
+];
+const TLS_OUT = [
+  F('tls.enabled','启用 TLS','bool',{g:G_TLS,d:'需填证书和私钥'}),
+  F('tls.server_name','服务器名（SNI）','text',{ph:'bing.com',g:G_TLS,d:'客户端 SNI 要一致'}),
+  F('tls.insecure','跳过证书校验','bool',{g:G_TLS,d:'自签证书时打开'}),
+  F('tls.alpn','ALPN 协议（逗号分隔）','list',{ph:'h3',g:G_TLS,d:'WS 用 http/1.1，hy2/tuic 用 h3'}),
+  F('tls.utls.enabled','启用指纹伪装','bool',{g:G_TLS,d:'Reality 必需'}),
+  F('tls.utls.fingerprint','浏览器指纹','select',{opts:['chrome','firefox','safari','edge','random','randomized'],g:G_TLS,d:'一般选 chrome'}),
+  F('tls.reality.enabled','启用 Reality','bool',{g:G_TLS,d:'无需证书，勾了就别填证书'}),
+  F('tls.reality.public_key','Reality 公钥','text',{g:G_TLS,d:'服务端生成的那串'}),
+  F('tls.reality.short_id','Reality 短 ID','text',{g:G_TLS,d:'和客户端一致'}),
+];
+/* 入站传输（vless/vmess/trojan 套 ws / gRPC / http 时需要） */
+const TRANSPORT_IN = [
+  F('transport.type','传输方式','select',{opts:['','ws','grpc','http','httpupgrade'],g:G_TP,d:'留空 = 不额外套传输'}),
+  F('transport.path','路径（path）','text',{ph:'/ws',g:G_TP,d:'要和客户端一致'}),
+  F('transport.host','主机名（仅 HTTP 传输用，逗号分隔）','list',{ph:'example.com',g:G_TP,d:'只有 HTTP 传输用'}),
+  F('transport.service_name','gRPC 服务名','text',{ph:'GunService',g:G_TP,d:'只有 gRPC 传输用'}),
+  F('transport.headers.Host','Host 头（WebSocket 用）','text',{ph:'example.com',g:G_TP,d:'套 CDN 时填 CDN 域名'}),
+  F('multiplex.enabled','启用多路复用','bool',{g:G_TP,d:'多条连接复用到一条'}),
+];
+const TRANSPORT_OUT = [
+  F('transport.type','传输方式','select',{opts:['','ws','grpc','http','httpupgrade'],g:G_TP,d:'留空 = 不额外套传输'}),
+  F('transport.path','路径（path）','text',{ph:'/ws',g:G_TP,d:'要和客户端一致'}),
+  F('transport.host','主机名（仅 HTTP 传输用，逗号分隔）','list',{ph:'example.com',g:G_TP,d:'只有 HTTP 传输用'}),
+  F('transport.service_name','gRPC 服务名','text',{ph:'GunService',g:G_TP,d:'只有 gRPC 传输用'}),
+  F('transport.headers.Host','Host 头（WebSocket 用）','text',{ph:'example.com',g:G_TP,d:'套 CDN 时填 CDN 域名'}),
+  F('multiplex.enabled','启用多路复用','bool',{g:G_TP,d:'多条连接复用到一条'}),
+];
+/* ---------------- 快速模板（常见组合一键套用） ---------------- */
+const PRESETS = {
+  inbound: {
+    vless: {
+      'Reality（无需证书）': { transport:{type:null, path:null, headers:null, service_name:null, host:null},
+        tls:{enabled:true, server_name:'www.bing.com', reality:{enabled:true, handshake:{server:'www.bing.com', server_port:443}, short_id:['0123456789abcdef']}} },
+      'WS + TLS（可套 CDN）': { transport:{type:'ws', path:'/ws', service_name:null}, tls:{enabled:true, alpn:['http/1.1'], reality:{enabled:false}} },
+      'WS + TLS（Cloudflare 回源）': { _hint:'套 CDN 的要点：客户端服务器地址填 CDN 域名、端口 443；这里 transport.path 和 Host 头要和客户端一致；证书可用 Cloudflare 源站证书（证书工具→粘贴导入）或自签。',
+        transport:{type:'ws', path:'/ws', headers:{Host:''}}, tls:{enabled:true, alpn:['http/1.1'], reality:{enabled:false}} },
+      'TCP + TLS': { transport:{type:null, path:null, headers:null, service_name:null}, tls:{enabled:true, reality:{enabled:false}} },
+    },
+    trojan: { 'WS + TLS（可套 CDN）': { transport:{type:'ws', path:'/ws'}, tls:{enabled:true, alpn:['http/1.1']} } },
+    vmess:  { 'WS + TLS（可套 CDN）': { transport:{type:'ws', path:'/ws'}, tls:{enabled:true, alpn:['http/1.1']} } },
+    hysteria2: { '标准 hy2（需证书）': { tls:{enabled:true, alpn:['h3'], certificate_path:'', key_path:''} } },
+    tuic:      { '标准 tuic（需证书）': { congestion_control:'bbr', zero_rtt_handshake:false, tls:{enabled:true, alpn:['h3'], certificate_path:'', key_path:''} } },
+  },
+  outbound: {
+    vless: {
+      'Reality 客户端': { transport:{type:null, path:null, headers:null, service_name:null}, flow:'xtls-rprx-vision',
+        tls:{enabled:true, server_name:'www.bing.com', utls:{enabled:true, fingerprint:'chrome'}, reality:{enabled:true, public_key:'', short_id:''}} },
+      'WS + TLS（套 CDN）': { _hint:'服务器地址填 CDN 域名、端口 443；path 和 Host 头必须和服务端一致。',
+        transport:{type:'ws', path:'/ws', service_name:null}, tls:{enabled:true, alpn:['http/1.1'], reality:{enabled:false}} },
+    },
+    trojan: { 'WS + TLS（套 CDN）': { server_port:443, transport:{type:'ws', path:'/ws'}, tls:{enabled:true, alpn:['http/1.1']} } },
+    vmess:  { 'WS + TLS（套 CDN）': { server_port:443, transport:{type:'ws', path:'/ws'}, tls:{enabled:true, alpn:['http/1.1']} } },
+    hysteria2: { '标准 hy2': { tls:{enabled:true, server_name:'bing.com', alpn:['h3']} } },
+    tuic:      { '标准 tuic': { congestion_control:'bbr', udp_relay_mode:'native', tls:{enabled:true, server_name:'bing.com', alpn:['h3']} } },
+  }
+};
+function deepMerge(a, b){
+  const o = Object.assign({}, a);
+  for(const k in b){
+    const bv = b[k], av = o[k];
+    if(bv === null){ delete o[k]; continue; }          // 模板用 null 表示“这个模式下该字段不存在”
+    if(bv && typeof bv==='object' && !Array.isArray(bv) && av && typeof av==='object' && !Array.isArray(av)) o[k] = deepMerge(av, bv);
+    else if(bv === undefined) o[k] = av;
+    else o[k] = JSON.parse(JSON.stringify(bv));
+  }
+  return o;
+}
+function applyPreset(name){
+  const e = state.editing; if(!e) return;
+  const tpl = ((PRESETS[e.kind]||{})[e.proto]||{})[name]; if(!tpl) return;
+  const hint = tpl._hint; const data = Object.assign({}, tpl); delete data._hint;
+  e.obj = deepMerge(e.obj||{}, data);
+  renderForm();
+  toast('已套用「'+name+'」' + (hint?('\n'+hint):'\n记得按自己的域名/端口改一下'), 'ok');
+}
+
+const USER_SPEC = {
+  mixed:      [F('username','用户名','text'), F('password','密码','pass')],
+  socks:      [F('username','用户名','text'), F('password','密码','pass')],
+  http:       [F('username','用户名','text'), F('password','密码','pass')],
+  vless:      [F('uuid','UUID','uuid'), F('flow','流控','select',{opts:['','xtls-rprx-vision'],d:'配合 TLS/Reality 用 vision'}), F('name','备注','text')],
+  vmess:      [F('uuid','UUID','uuid'), F('name','备注','text')],
+  trojan:     [F('password','密码','pass'), F('name','备注','text')],
+  hysteria2:  [F('password','密码','pass'), F('name','备注','text')],
+  tuic:       [F('uuid','UUID','uuid'), F('password','密码','pass')],
+};
+const LISTEN = [
+  F('tag','标签（tag）','text',{req:1,ph:'mixed-in',g:G_BASE}),
+  F('listen','监听地址','text',{ph:'0.0.0.0',g:G_BASE}),
+  F('listen_port','监听端口','num',{ph:'443',g:G_BASE}),
+];
+const SRV = [
+  F('tag','标签（tag）','text',{req:1,ph:'proxy-hk',g:G_BASE}),
+  F('server','服务器地址','text',{ph:'1.2.3.4',g:G_BASE}),
+  F('server_port','服务器端口','num',{ph:'443',g:G_BASE}),
+];
+
+const SCHEMA = {
+  inbound: {
+    mixed:      {icon:'🔀', fields:[...LISTEN]},
+    socks:      {icon:'🧦', fields:[...LISTEN]},
+    http:       {icon:'🌐', fields:[...LISTEN, ...TLS_IN]},
+    tun:        {icon:'🛡️', fields:[F('tag','标签（tag）','text',{req:1,ph:'tun-in',g:G_BASE}),
+                  F('address','地址段（逗号分隔）','list',{ph:'172.19.0.1/30',g:G_BASE,d:'tun 自己的网段'}),
+                  F('mtu','MTU（分包大小）','num',{ph:'9000',g:G_PARAM,d:'一般 9000'}),
+                  F('auto_route','自动路由','bool',{g:G_PARAM,d:'接管系统路由'}),
+                  F('strict_route','严格路由','bool',{g:G_PARAM,d:'防止流量绕过 tun'}),
+                  F('stack','网络栈','select',{opts:['','system','gvisor','mixed'],g:G_PARAM,d:'一般用 system'})]},
+    vless:      {icon:'⚡', fields:[...LISTEN, ...TLS_IN, ...REALITY_IN, ...TRANSPORT_IN]},
+    vmess:      {icon:'📦', fields:[...LISTEN, ...TLS_IN, ...TRANSPORT_IN]},
+    trojan:     {icon:'🐴', fields:[...LISTEN, ...TLS_IN, ...TRANSPORT_IN,
+                  F('fallback.server','回落目标地址','text',{g:G_PARAM}),
+                  F('fallback.server_port','回落端口','num',{g:G_PARAM})]},
+    shadowsocks:{icon:'🌫️', fields:[...LISTEN,
+                  F('method','加密方式','select',{opts:['2022-blake3-aes-128-gcm','2022-blake3-aes-256-gcm','2022-blake3-chacha20-poly1305','aes-128-gcm','aes-256-gcm','chacha20-ietf-poly1305','none'],g:G_BASE}),
+                  F('password','密码','pass',{g:G_BASE,d:'和另一端一致'}),
+                  F('network','网络','select',{opts:['','tcp','udp'],g:G_PARAM,d:'留空 = tcp+udp'})]},
+    hysteria2:  {icon:'🚀', fields:[...LISTEN,
+                  F('up_mbps','上行限速（Mbps）','num',{g:G_PARAM,d:'留空 = 不限速'}),
+                  F('down_mbps','下行限速（Mbps）','num',{g:G_PARAM,d:'留空 = 不限速'}),
+                  F('obfs.type','混淆类型','select',{opts:['','salamander'],g:G_PARAM,d:'客户端要一致'}),
+                  F('obfs.password','混淆密码','pass',{g:G_PARAM,d:'客户端要一致'}),
+                  F('ignore_client_bandwidth','忽略客户端带宽','bool',{g:G_PARAM,d:'忽略客户端上报的带宽'}),
+                  F('masquerade','伪装站点（URL）','text',{ph:'https://bing.com',g:G_PARAM,d:'直接用浏览器访问时会看到这个站'}),
+                  ...TLS_MANDATORY]},
+    tuic:       {icon:'🛞', fields:[...LISTEN,
+                  F('congestion_control','拥塞控制','select',{opts:['','cubic','new_reno','bbr'],g:G_PARAM,d:'bbr 一般最快'}),
+                  F('auth_timeout','认证超时','text',{ph:'3s',g:G_PARAM,d:'默认 3s'}),
+                  F('zero_rtt_handshake','0-RTT 快速握手','bool',{g:G_PARAM,d:'省一次往返，可选'}),
+                  F('heartbeat','心跳间隔','text',{ph:'10s',g:G_PARAM,d:'保活用，10s 左右'}),
+                  ...TLS_MANDATORY]},
+  },
+  outbound: {
+    direct:     {icon:'➡️', fields:[F('tag','标签（tag）','text',{req:1,ph:'direct',g:G_BASE})]},
+    block:      {icon:'⛔', fields:[F('tag','标签（tag）','text',{req:1,ph:'block',g:G_BASE})]},
+    vless:      {icon:'⚡', fields:[...SRV,
+                  F('uuid','UUID','uuid',{g:G_BASE,d:'点右边生成'}),
+                  F('flow','流控','select',{opts:['','xtls-rprx-vision'],g:G_BASE,d:'配合 TLS/Reality 用 vision'}),
+                  ...TLS_OUT, ...TRANSPORT_OUT]},
+    vmess:      {icon:'📦', fields:[...SRV,
+                  F('uuid','UUID','uuid',{g:G_BASE,d:'点右边生成'}),
+                  F('security','加密方式','select',{opts:['','auto','none','zero','aes-128-gcm','chacha20-poly1305'],g:G_BASE,d:'一般用 auto'}),
+                  ...TLS_OUT, ...TRANSPORT_OUT]},
+    trojan:     {icon:'🐴', fields:[...SRV,
+                  F('password','密码','pass',{g:G_BASE,d:'和另一端一致'}),
+                  ...TLS_OUT, ...TRANSPORT_OUT]},
+    shadowsocks:{icon:'🌫️', fields:[...SRV,
+                  F('method','加密方式','select',{opts:['2022-blake3-aes-128-gcm','2022-blake3-aes-256-gcm','2022-blake3-chacha20-poly1305','aes-128-gcm','aes-256-gcm','chacha20-ietf-poly1305'],g:G_BASE,d:'两端必须一致'}),
+                  F('password','密码','pass',{g:G_BASE,d:'和另一端一致'})]},
+    socks:      {icon:'🧦', fields:[...SRV,
+                  F('version','版本','select',{opts:['5','4','4a'],g:G_BASE,d:'出站填 5'}),
+                  F('username','用户名','text',{g:G_BASE}),
+                  F('password','密码','pass',{g:G_BASE,d:'和另一端一致'})]},
+    http:       {icon:'🌐', fields:[...SRV,
+                  F('username','用户名','text',{g:G_BASE}),
+                  F('password','密码','pass',{g:G_BASE,d:'和另一端一致'}),
+                  F('tls.enabled','启用 TLS','bool',{g:G_TLS,d:'需填证书和私钥'})]},
+    hysteria2:  {icon:'🚀', fields:[...SRV,
+                  F('password','密码','pass',{g:G_BASE,d:'和另一端一致'}),
+                  F('up_mbps','上行限速（Mbps）','num',{g:G_PARAM,d:'留空 = 不限速'}),
+                  F('down_mbps','下行限速（Mbps）','num',{g:G_PARAM,d:'留空 = 不限速'}),
+                  F('obfs.type','混淆类型','select',{opts:['','salamander'],g:G_PARAM,d:'客户端要一致'}),
+                  F('obfs.password','混淆密码','pass',{g:G_PARAM,d:'客户端要一致'}),
+                  ...['tls.enabled','tls.server_name','tls.insecure','tls.alpn'].map(k=>TLS_OUT.find(f=>f.k===k))]},
+    tuic:       {icon:'🛞', fields:[...SRV,
+                  F('uuid','UUID','uuid',{g:G_BASE,d:'点右边生成'}),
+                  F('password','密码','pass',{g:G_BASE,d:'和另一端一致'}),
+                  F('congestion_control','拥塞控制','select',{opts:['','cubic','new_reno','bbr'],g:G_PARAM,d:'bbr 一般最快'}),
+                  F('udp_relay_mode','UDP 中继模式','select',{opts:['','native','quic'],g:G_PARAM,d:'native 兼容性最好'}),
+                  F('zero_rtt_handshake','0-RTT 快速握手','bool',{g:G_PARAM,d:'省一次往返，可选'}),
+                  F('heartbeat','心跳间隔','text',{ph:'10s',g:G_PARAM,d:'保活用，10s 左右'}),
+                  F('udp_over_stream','UDP 走流式传输','bool',{g:G_PARAM,d:'部分服务端要求开'}),
+                  ...['tls.enabled','tls.server_name','tls.insecure','tls.alpn'].map(k=>TLS_OUT.find(f=>f.k===k))]},
+  }
+};
+
+/* ---------------- 路径读写 ---------------- */
+function getPath(o, k){
+  return k.split('.').reduce((a, p)=> (a==null?undefined:a[p]), o);
+}
+function setPath(o, k, v){
+  const ps = k.split('.'); let cur = o;
+  for(let i=0;i<ps.length-1;i++){ if(typeof cur[ps[i]]!=='object'||cur[ps[i]]===null) cur[ps[i]]={}; cur = cur[ps[i]]; }
+  cur[ps[ps.length-1]] = v;
+}
+function delPath(o, k){
+  const ps = k.split('.'); let cur = o;
+  for(let i=0;i<ps.length-1;i++){ if(!cur[ps[i]]) return; cur = cur[ps[i]]; }
+  delete cur[ps[ps.length-1]];
+}
+function dropEmpty(o){
+  for(const k in o){
+    const v = o[k];
+    if(v===null || v==='' ) { delete o[k]; continue; }
+    if(Array.isArray(v)){ if(!v.length){ delete o[k]; continue; } v.forEach(x=>{ if(x&&typeof x==='object') dropEmpty(x); }); continue; }
+    if(typeof v==='object'){ dropEmpty(v); if(!Object.keys(v).length) delete o[k]; }
+  }
+  return o;
+}
+
+/* ---------------- 表单渲染 ---------------- */
+// 出站没有 users 概念（uuid/password 是出站自己的字段），只有入站才有用户组
+function userSpec(kind, proto){ return kind === 'inbound' ? (USER_SPEC[proto] || null) : null; }
+function typeOptions(kind, sel){
+  return Object.keys(SCHEMA[kind]).map(p=>`<option value="${p}" ${p===sel?'selected':''}>${SCHEMA[kind][p].icon} ${p}</option>`).join('');
+}
+function openNew(kind, proto){
+  proto = proto || Object.keys(SCHEMA[kind])[0];
+  state.editing = { kind, tag:null, proto, obj:{} };
+  $('#mTitle').textContent = kind==='inbound' ? '新建入站' : '新建出站';
+  $('#mType').innerHTML = typeOptions(kind, proto);
+  $('#mNote').textContent = '保存后记得点「配置检查」或直接热重载；坏配置会被 sing-box 拒绝并提示原因。';
+  $('#mJson').value = ''; setSeg('form'); renderForm(); $('#modal').classList.add('on');
+}
+async function openEdit(kind, tag){
+  const key = kind==='inbound' ? 'inbounds' : 'outbounds';
+  let src = (state.config && state.config[key] || []).find(x=>x.tag===tag);
+  if(!src){                                  // 本地副本过期（刚保存/刚绑定过）→ 拉一次最新的
+    await loadConfig();
+    src = (state.config && state.config[key] || []).find(x=>x.tag===tag);
+  }
+  if(!src){ toast('配置里找不到 '+kind+'「'+tag+'」，列表可能过期，已刷新配置，请重试','bad'); loadConfig(); return; }
+  const obj = JSON.parse(JSON.stringify(src));
+  const proto = obj.type || Object.keys(SCHEMA[kind])[0];
+  state.editing = { kind, tag, proto, obj };
+  $('#mTitle').textContent = (kind==='inbound'?'编辑入站 ':'编辑出站 ')+tag;
+  $('#mType').innerHTML = typeOptions(kind, proto);
+  $('#mNote').textContent = '改 tag 会变成新增（旧 tag 需手动删）。协议类型切换会重置字段。';
+  resetSeg(); renderForm(); $('#modal').classList.add('on');
+}
+function switchType(proto){
+  const e = state.editing; if(!e) return;
+  const keepTag = e.obj.tag || '';
+  e.proto = proto; e.obj = keepTag ? {tag:keepTag} : {};
+  renderForm();
+}
+function fieldInput(f, val, idx){
+  const id = 'fld_'+f.k.replace(/\./g,'__')+(idx==null?'':('_'+idx));
+  const v = val==null ? '' : val;
+  switch(f.t){
+    case 'bool': {
+      const on = (v === undefined || v === null || v === '') ? !!f.def : !!v;
+      return `<label class="in" style="cursor:pointer;justify-content:flex-start"><input type="checkbox" id="${id}" ${on?'checked':''} ${f.k.startsWith('tls.')?'onchange="tlsToggle()"':''}></label>`;
+    }
+    case 'num':
+      return `<input type="number" id="${id}" value="${esc(v)}" placeholder="${esc(f.ph||'')}">`;
+    case 'list':
+      return `<input id="${id}" value="${esc(Array.isArray(v)?v.join(', '):v)}" placeholder="${esc(f.ph||'逗号分隔')}">`;
+    case 'select': {
+      const s = String(v||'');
+      const opts = (f.opts||[]).map(o=>`<option value="${esc(o)}" ${o===s?'selected':''}>${o===''?'（默认）':esc(o)}</option>`).join('');
+      return `<select id="${id}">${opts}</select>`;
+    }
+    case 'uuid':
+      return `<div class="in"><input id="${id}" value="${esc(v)}" placeholder="${esc(f.ph||'UUID')}"><button class="mini" onclick="fill('${id}', genUuid())">生成 UUID</button></div>`;
+    case 'pass':
+      return `<div class="in"><input id="${id}" value="${esc(v)}" placeholder="${esc(f.ph||'密码')}"><button class="mini" onclick="fill('${id}', genPass(16))">随机</button></div>`;
+    case 'realitykey':
+      return `<div class="in"><input id="${id}" value="${esc(v)}" placeholder="点右边生成"><button class="mini" onclick="genReality()">生成密钥对</button></div>`;
+    case 'cert':
+    case 'key':
+      return `<div class="in"><input id="${id}" list="certlist_${f.t}" value="${esc(v)}" placeholder="/etc/sing-box/certs/x.crt">
+        <button class="mini" onclick="quickSelfSigned('${id}')">自签</button></div>`;
+    default:
+      return `<input id="${id}" value="${esc(v)}" placeholder="${esc(f.ph||'')}">`;
+  }
+}
+function fill(id, text){ const el = document.getElementById(id); if(el){ el.value = text; } }
+function renderForm(){
+  const e = state.editing; if(!e) return;
+  const sc = SCHEMA[e.kind][e.proto] || { fields:[] };
+  const tpls = ((PRESETS[e.kind]||{})[e.proto])||{};
+  $('#mPresets').innerHTML = Object.keys(tpls).length
+    ? ('<span class="meta">快速模板：</span>' + Object.keys(tpls).map(k=>`<button class="mini ghost" onclick="applyPreset('${esc(k)}')">${esc(k)}</button>`).join(''))
+    : '';
+  let html = '', lastG = null;
+  sc.fields.forEach(f=>{
+    const g = f.g || '参数';
+    if(g !== lastG){ html += `<div class="sect">${esc(g)}</div>`; lastG = g; }
+    html += `<div class="f"><label>${esc(f.l)}${f.req?' <span style="color:#ef4444">*</span>':''}${f.d?`<span class="fd">${esc(f.d)}</span>`:''}</label>${fieldInput(f, getPath(e.obj, f.k))}</div>`;
+  });
+  html += '<div class="hint" id="tlsNote" style="grid-column:1/-1"></div>';
+  $('#mForm').innerHTML = html;
+  const us = userSpec(e.kind, e.proto);
+  if(us){
+    $('#mUsersSect').style.display = '';
+    $('#mUsers').style.display = '';
+    renderUsers();
+  } else {
+    $('#mUsersSect').style.display = 'none';
+    $('#mUsers').style.display = 'none';
+    $('#mUsers').innerHTML = '';
+  }
+  // 证书下拉建议
+  const dl = (state.certs && state.certs.certs || []).map(c=>`<option value="${esc(c)}"></option>`).join('')
+           + (state.certs && state.certs.keys || []).map(k=>`<option value="${esc(k)}"></option>`).join('');
+  if(dl && !document.getElementById('certlist_cert')){
+    const d = document.createElement('div'); d.innerHTML = `<datalist id="certlist_cert">${dl}</datalist><datalist id="certlist_key">${dl}</datalist>`;
+    document.body.appendChild(d);
+  }
+  tlsToggle();
+}
+function tlsToggle(){
+  // TLS 关闭时把证书类字段灰掉；Reality 开启时证书字段必须禁用
+  // （sing-box 对 reality + 证书是 FATAL: certificate is unavailable in reality）
+  const tlsOn = (()=>{ const c = document.getElementById('fld_tls__enabled'); return c ? c.checked : true; })();
+  const rcEl = document.getElementById('fld_tls__reality__enabled');
+  const rcOn = rcEl ? rcEl.checked : false;
+  ['fld_tls__certificate_path','fld_tls__key_path'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el){ el.disabled = !tlsOn || rcOn; el.title = rcOn ? 'Reality 模式不需要证书，两者不能同时用' : ''; }
+  });
+  const sn = document.getElementById('fld_tls__server_name'); if(sn) sn.disabled = !tlsOn;
+  const note = document.getElementById('tlsNote');
+  if(note){
+    if(rcOn) note.textContent = 'Reality 模式：不要填证书（同时填会 FATAL: certificate is unavailable in reality）。伪装目标填一个能被访问的真实站点，它同时用作客户端 SNI。';
+    else if(!tlsOn) note.textContent = '未启用 TLS：只有 CDN 回源到明文端口（或内网）时才这样配。';
+    else note.textContent = 'TLS 模式：需要证书和私钥（证书工具里可以自签或粘贴导入）。';
+  }
+}
+async function genReality(){
+  try{
+    const r = await api('/api/gen/reality',{method:'POST'});
+    fill('fld_tls__reality__private_key', r.private_key);
+    prompt('服务端私钥已填入表单。\n下面这行是公钥，复制到客户端（Reality 的 public_key）：', r.public_key);
+  }catch(e){ toast(e.message,'bad'); }
+}
+function renderUsers(){
+  const e = state.editing, us = userSpec(e.kind, e.proto) || [];
+  const list = Array.isArray(e.obj.users) ? e.obj.users : (e.obj.users ? [e.obj.users] : []);
+  $('#mUsers').innerHTML = list.map((u,i)=>`<div class="urow">${us.map(f=>fieldInput(f, u[f.k], i)).join('')}
+    <button class="mini danger" onclick="delUser(${i})">删除</button></div>`).join('')
+    || '<div class="meta">还没有用户，点下面「添加用户」。</div>';
+  $('#mUsers').innerHTML += `<div class="row"><button class="mini" onclick="addUser()">＋ 添加用户</button><span class="meta">不添加用户则不写 users 字段（匿名连接）</span></div>`;
+}
+function collectUsers(){
+  const e = state.editing, us = userSpec(e.kind, e.proto) || [];
+  const rows = $('#mUsers').querySelectorAll('.urow');
+  const out = [];
+  rows.forEach((row, i)=>{
+    const u = {};
+    us.forEach(f=>{ u[f.k] = readField(f, i); });
+    dropEmpty(u);
+    if(Object.keys(u).length) out.push(u);
+  });
+  return out;
+}
+function addUser(){
+  collectInto(state.editing.obj);
+  const us = userSpec(state.editing.kind, state.editing.proto) || [];
+  if(!us.length) return;
+  const u = {}; us.forEach(f=>{ if(f.t==='uuid') u[f.k] = genUuid(); else if(f.t==='pass') u[f.k] = genPass(16); });
+  state.editing.obj.users = (state.editing.obj.users||[]).concat([u]);
+  renderUsers();
+}
+function delUser(i){
+  collectInto(state.editing.obj);
+  state.editing.obj.users = (state.editing.obj.users||[]).filter((_,x)=>x!==i);
+  if(!state.editing.obj.users.length) delete state.editing.obj.users;
+  renderUsers();
+}
+function readField(f, idx){
+  const el = document.getElementById('fld_'+f.k.replace(/\./g,'__')+(idx==null?'':('_'+idx)));
+  if(!el) return undefined;
+  if(f.t==='bool') return el.checked;
+  if(f.t==='num') return el.value==='' ? undefined : Number(el.value);
+  if(f.t==='list') return el.value.split(',').map(s=>s.trim()).filter(Boolean);
+  return el.value;
+}
+function collectInto(obj){
+  const e = state.editing; const sc = SCHEMA[e.kind][e.proto] || {fields:[]};
+  sc.fields.forEach(f=>{
+    const v = readField(f);
+    // 省略即 false：布尔字段只在为 true 时才写进配置，避免生成
+    // multiplex:{enabled:false} / tls:{reality:{enabled:false}} 这类无用字段
+    if(v===undefined || v==='' || v===false || (Array.isArray(v)&&!v.length)) delPath(obj, f.k);
+    else setPath(obj, f.k, v);
+  });
+  if(userSpec(e.kind, e.proto)){
+    const us = collectUsers();
+    if(us.length) obj.users = us; else delete obj.users;
+  }
+  // Reality 与证书互斥：兜底清掉（JSON 页签绕过了界面禁用的场景）
+  if(getPath(obj,'tls.reality.enabled')){
+    delPath(obj,'tls.certificate_path');
+    delPath(obj,'tls.key_path');
+  }
+  return dropEmpty(obj);
+}
+function resetSeg(){
+  // 打开新建/编辑时先把页签状态和文本框重置干净，否则残留状态会把对象冲掉
+  state.seg = 'form';
+  $('#mJson').value = '';
+  $('#mJson').style.display = 'none';
+  $('#mFormWrap').style.display = '';
+  $('#segForm').classList.add('on'); $('#segJson').classList.remove('on');
+}
+function setSeg(which){
+  // 用显式状态判断“是否正停在 JSON 页签”。靠 DOM 的 display 判断不行：
+  // 关闭弹窗不会还原 display，切回表单时会把残留（甚至刚被清空的）文本框当成用户输入。
+  const fromJson = state.seg === 'json';
+  state.seg = which;
+  $('#segForm').classList.toggle('on', which==='form');
+  $('#segJson').classList.toggle('on', which==='json');
+  $('#mFormWrap').style.display = which==='form' ? '' : 'none';
+  $('#mJson').style.display = which==='json' ? '' : 'none';
+  if(which==='json'){
+    // 从表单切到 JSON：先把界面上已填的值收进对象，否则文本框里只有个 {type:...}
+    if(state.editing && $('#mForm').children.length) collectInto(state.editing.obj);
+    const o = JSON.parse(JSON.stringify(state.editing.obj||{}));
+    o.type = state.editing.proto;
+    $('#mJson').value = JSON.stringify(o, null, 2);
+    return;
+  }
+  if(fromJson){
+    try{
+      const o = JSON.parse($('#mJson').value || '{}');
+      if(o.type){ state.editing.proto = o.type; $('#mType').value = o.type; delete o.type; }
+      state.editing.obj = o;
+    }catch(_){}
+  }
+  $('#mJson').value = '';
+  renderForm();
+}
+async function saveObj(){
+  const e = state.editing; if(!e) return;
+  let data;
+  if($('#mJson').style.display !== 'none'){
+    try{ data = JSON.parse($('#mJson').value); if(!data.type) data.type = e.proto; }
+    catch(err){ toast('JSON 语法错误: '+err.message,'bad'); return; }
+  } else {
+    data = collectInto(JSON.parse(JSON.stringify(e.obj||{})));
+    data.type = e.proto;
+    Object.keys(data).forEach(k=>{ if(k===e.proto) delete data[k]; });
+  }
+  if(!data.tag){ toast('必须填 tag','bad'); return; }
+  try{
+    const r = await api('/api/object',{method:'POST',body:JSON.stringify({kind:e.kind, original:e.tag, data})});
+    toast('已保存','ok'); afterWrite(r); closeModal(); loadConfig();
+  }catch(err){ toast(err.message,'bad'); }
+}
+function closeModal(){ $('#modal').classList.remove('on'); resetSeg(); }
+
+/* ---------------- 证书工具 ---------------- */
+async function loadCerts(){
+  try{ state.certs = await api('/api/certs'); }catch(_){ state.certs = null; }
+}
+async function certTools(){
+  const info = state.certs || {};
+  const txt = prompt('证书工具\n\n证书目录: '+ (info.dir||'')
+    + '\n已发现: ' + ((info.pairs||[]).map(p=>p.name).join(', ')||'无')
+    + '\n\n输入要自签的域名（例如 bing.com），我会生成 cert+key 并填进表单；\n想导入自己的证书请在下面输入：名=你给的名字（不改就点取消）', 'bing.com');
+  if(txt===null) return;
+  if(!txt.includes('=')){
+    try{
+      const r = await api('/api/certs/selfsigned',{method:'POST',body:JSON.stringify({domain:txt, name:txt})});
+      await loadCerts();
+      const cEl = $('#fld_tls__certificate_path') || $('#fld_tls__certificate_path');
+      if(document.getElementById('fld_tls__certificate_path')) fill('fld_tls__certificate_path', r.certificate_path);
+      if(document.getElementById('fld_tls__key_path')) fill('fld_tls__key_path', r.key_path);
+      toast(r.msg + '\n' + r.certificate_path + '\n' + r.key_path, 'ok');
+    }catch(e){ toast(e.message,'bad'); }
+  }
+}
+async function quickSelfSigned(fieldId){
+  const cur = document.getElementById(fieldId);
+  const domain = prompt('自签证书的域名（CN / SAN）', 'bing.com');
+  if(!domain) return;
+  try{
+    const r = await api('/api/certs/selfsigned',{method:'POST',body:JSON.stringify({domain, name:domain})});
+    await loadCerts();
+    if(fieldId.includes('certificate')) fill('fld_tls__certificate_path', r.certificate_path);
+    if(fieldId.includes('key')) fill('fld_tls__key_path', r.key_path);
+    else if(document.getElementById('fld_tls__key_path')) fill('fld_tls__key_path', r.key_path);
+    toast(r.msg+'\n'+r.certificate_path, 'ok');
+  }catch(e){ toast(e.message,'bad'); }
+}
+
+/* ---------------- 原始 JSON / 服务 / 日志 ---------------- */
+function fmtRaw(){
+  try{ $('#raw').value = JSON.stringify(JSON.parse($('#raw').value), null, 2); toast('已格式化','ok'); }
+  catch(e){ toast('JSON 语法错误: '+e.message,'bad'); }
+}
+async function saveRaw(){
+  try{
+    JSON.parse($('#raw').value);
+    const r = await api('/api/config',{method:'PUT',body:JSON.stringify({raw:$('#raw').value})});
+    toast('配置已保存（旧文件已备份）','ok'); afterWrite(r); loadConfig();
+  }catch(e){ toast(e.message,'bad'); }
+}
+async function checkCfg(){
+  try{ const r = await api('/api/config/check',{method:'POST'});
+    toast(r.ok ? '配置检查通过' : ('配置有误: '+r.output), r.ok?'ok':'bad');
+  }catch(e){ toast(e.message,'bad'); }
+}
+async function svc(action){
+  try{ const r = await api('/api/service',{method:'POST',body:JSON.stringify({action})});
+    toast(r.msg||(action+' 完成'),'ok'); refreshStatus();
+  }catch(e){ toast(e.message,'bad'); refreshStatus(); }
+}
+async function loadLog(){
+  try{ const r = await api('/api/logs?lines=300'); $('#logbox').textContent = r.log || '(空)'; }
+  catch(e){ $('#logbox').textContent = '读取失败: '+e.message; }
+}
+
+/* ---------------- 初始化 ---------------- */
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');
+  document.querySelectorAll('.pane').forEach(p=>p.classList.remove('on'));
+  $('#pane-'+b.dataset.t).classList.add('on');
+  if(b.dataset.t==='log') loadLog();
+  if(b.dataset.t==='graph') requestAnimationFrame(drawEdges);
+});
+$('#modal').addEventListener('click', e=>{ if(e.target.id==='modal') closeModal(); });
+$('#acct').addEventListener('click', e=>{ if(e.target.id==='acct') closeAcct(); });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeModal(); });
+loadCerts(); refreshStatus(); loadConfig();
+setInterval(refreshStatus, 3000);
+setInterval(()=>{ const on = document.querySelector('.pane.on'); if(on && on.id==='pane-log') loadLog(); }, 10000);
+</script>
+</body>
+</html>
