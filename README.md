@@ -47,8 +47,8 @@ sudo ./install.sh
 ### 常用参数
 
 ```bash
-sudo ./install.sh --user admin --password 'kof97boss'   # 指定账号密码
-sudo ./install.sh --port 3223                           # 换端口
+sudo ./install.sh --user admin --password 'admin123'   # 指定账号密码
+sudo ./install.sh --port 3222                           # 换端口
 sudo ./install.sh --singbox-url https://.../sing-box     # 用你自己的 sing-box 直链
 sudo ./install.sh --no-singbox                          # 不装 sing-box（你自己已经有）
 sudo ./install.sh --force-singbox                       # 已装也覆盖成仓库里的版本
@@ -59,7 +59,7 @@ sudo ./install.sh --node                                # 面板用 Node 版运�
 一条命令带参数（注意 `-s --`）：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kuisa/sbpanel/main/install.sh | sudo bash -s -- --user admin --password 'kof97boss' --port 3223
+curl -fsSL https://raw.githubusercontent.com/kuisa/sbpanel/main/install.sh | sudo bash -s -- --user admin --password 'admin123' --port 3222
 ```
 
 ### 各系统差异
