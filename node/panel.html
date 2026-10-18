@@ -195,6 +195,21 @@ code{background:#0c1424;border:1px solid var(--line);border-radius:5px;padding:1
     <span class="meta" id="ac_note"></span>
   </div>
 </div></div>
+<div class="modal" id="sh"><div class="box" style="max-width:720px">
+  <h3 id="shTitle">节点链接</h3>
+  <div class="meta" id="shNote" style="margin:8px 0 12px"></div>
+  <div class="f"><label>分享链接（直接粘到客户端）</label>
+    <div class="in"><input id="shLink" readonly onclick="this.select()">
+      <button class="mini" onclick="copyLink()">复制</button></div>
+  </div>
+  <div class="sect">该入站的配置（JSON，只读）</div>
+  <textarea id="shRaw" readonly style="min-height:180px"></textarea>
+  <div class="toolbar">
+    <button class="primary" onclick="copyLink()">复制链接</button>
+    <button onclick="closeShare()">关闭</button>
+    <span class="meta">地址 = 当前出口 IP + 配置端口；IP 变了重新打开本窗口即可</span>
+  </div>
+</div></div>
 <div class="toast" id="toast"></div>
 <script>
 const $ = s => document.querySelector(s);
@@ -320,6 +335,7 @@ async function refreshStatus(){
     $('#memSub').textContent = fmtBytes(s.mem.used)+' / '+fmtBytes(s.mem.total);
     if(s.disk){ $('#disk').textContent = s.disk.percent+'%'; $('#diskBar').style.width=Math.min(100,s.disk.percent)+'%';
       $('#diskSub').textContent = fmtBytes(s.disk.used)+' / '+fmtBytes(s.disk.total)+' （可用 '+fmtBytes(s.disk.free)+'）'; }
+    state.exitIp = s.exitIp || '';
     $('#ip').textContent = s.exitIp || '获取失败';
     $('#ipSub').textContent = s.exitIp ? ('检查于 '+new Date(s.ipCheckedAt).toLocaleTimeString()) : '网络不可达或被墙';
     $('#host').textContent = s.hostname;
@@ -359,7 +375,8 @@ function renderGraph(){
       <div class="t">${PROTO_ICON[i.type]||''} ${esc(i.tag)}</div>
       <div class="m">${esc(i.type)} ${i.listen?esc(i.listen):''}${i.port?':'+i.port:''}</div>
       <div class="row"><span class="meta">出站→</span>
-        <select onchange="bind('${esc(i.tag)}', this.value)">${outOptions(cur, true)}</select></div>
+        <select onchange="bind('${esc(i.tag)}', this.value)">${outOptions(cur, true)}</select>
+        <button class="mini ghost" onclick="shareDialog('${esc(i.tag)}')" title="复制节点链接">链接</button></div>
     </div>`;
   }).join('') : '<div class="meta">没有入站</div>';
 
@@ -431,6 +448,174 @@ function brief(kind, o){
   if(obj.transport && obj.transport.type && obj.transport.type!=='tcp') parts.push(obj.transport.type);
   return parts.join(' · ') || '本地出站';
 }
+/* ============================================================
+   节点分享链接：用「出口 IP + 配置里的端口」生成，地址不同不影响
+   支持 ss / vmess / vless / trojan / hysteria2 / tuic
+   ============================================================ */
+function b64url(str){
+  // 标准 base64，去掉 padding（v2ray 系客户端能直接解）
+  return btoa(unescape(encodeURIComponent(str))).replace(/=+$/,'');
+}
+function hostOf(inb){
+  // 监听地址只影响本机绑定；对外一律用出口 IP
+  const ip = state.exitIp || '<你的出口IP>';
+  const v6 = ip.includes(':') && !ip.startsWith('[');
+  return { ip: v6 ? '['+ip+']' : ip, raw: ip, v6 };
+}
+function firstUser(inb, keys){
+  const us = inb.users;
+  if(!us) return {};
+  const u = Array.isArray(us) ? us[0] : us;
+  if(!u) return {};
+  const o = {};
+  keys.forEach(k=>{ if(u[k] !== undefined) o[k] = u[k]; });
+  return o;
+}
+function tlsOf(inb){
+  const t = inb.tls || {};
+  return {
+    on: !!t.enabled,
+    sni: t.server_name || '',
+    alpn: Array.isArray(t.alpn) ? t.alpn : [],
+    insecure: !!t.insecure,
+    reality: !!(t.reality && t.reality.enabled),
+    pbk: (t.reality && t.reality.public_key) || '',
+    sid: (t.reality && t.reality.short_id) || '',
+    fp: (t.utls && t.utls.fingerprint) || '',
+  };
+}
+function transportOf(inb){
+  const tr = inb.transport || {};
+  return {
+    type: tr.type || '',
+    path: tr.path || '/',
+    host: (tr.headers && (tr.headers.Host || tr.headers.host)) || tr.host || '',
+    svc: tr.service_name || '',
+  };
+}
+function q(params){
+  const parts = [];
+  Object.keys(params).forEach(k=>{
+    const v = params[k];
+    if(v === undefined || v === null || v === '' || v === false) return;
+    if(Array.isArray(v)) { if(v.length) parts.push(k + '=' + encodeURIComponent(v.join(','))); return; }
+    parts.push(k + '=' + encodeURIComponent(String(v)));
+  });
+  return parts.length ? ('?' + parts.join('&')) : '';
+}
+
+function makeLink(inb){
+  const t = inb.type;
+  const h = hostOf(inb);
+  const port = inb.listen_port;
+  const tls = tlsOf(inb), tr = transportOf(inb);
+  const net = (tr.type === 'httpupgrade') ? 'httpupgrade' : tr.type;
+  const common = {
+    type: net, path: net ? tr.path : '', host: net ? tr.host : '',
+    serviceName: (net === 'grpc') ? tr.svc : '',
+    sni: tls.on ? tls.sni : '', alpn: tls.on ? tls.alpn : '',
+    fp: tls.fp || (tls.reality ? 'chrome' : ''), security: '', pbk: '', sid: '',
+  };
+  if(tls.reality) common.security = 'reality';
+  else if(tls.on) common.security = 'tls';
+  if(tls.reality){ common.pbk = tls.pbk; common.sid = tls.sid; }
+
+  switch(t){
+    case 'shadowsocks': {
+      const pw = (inb.password !== undefined) ? inb.password
+               : (firstUser(inb, ['password']).password || '');
+      const m = inb.method || '';
+      const tag = inb.tag ? ('#' + inb.tag) : '';
+      const plain = m + ':' + pw + '@' + h.raw + ':' + port + tag;
+      return 'ss://' + b64url(plain);
+    }
+    case 'vmess': {
+      const u = firstUser(inb, ['uuid']);
+      const o = {
+        v: '2', ps: inb.tag || 'vmess', add: h.raw, port: String(port), id: u.uuid || '',
+        aid: '0', scy: 'auto', net: net || 'tcp', type: 'none',
+        host: tr.host || '', path: tr.path || '',
+        tls: tls.on ? 'tls' : '', sni: tls.sni || '', alpn: tls.alpn.join(',') || '',
+        fp: tls.fp || '',
+      };
+      return 'vmess://' + b64url(JSON.stringify(o));
+    }
+    case 'vless': {
+      const u = firstUser(inb, ['uuid']);
+      const flow = (firstUser(inb, ['flow']).flow) || '';
+      const p = {
+        type: net || 'tcp', encryption: 'none',
+        security: common.security, sni: common.sni, alpn: common.alpn.join(','),
+        fp: common.fp, pbk: common.pbk, sid: common.sid,
+        flow: flow, path: common.path, host: common.host, serviceName: common.serviceName,
+      };
+      return 'vless://' + (u.uuid || '') + '@' + h.ip + ':' + port + q(p) + (inb.tag ? '#'+encodeURIComponent(inb.tag) : '');
+    }
+    case 'trojan': {
+      const pw = firstUser(inb, ['password']).password || inb.password || '';
+      const p = {
+        security: tls.on ? (tls.reality ? 'reality' : 'tls') : '',
+        sni: tls.sni, alpn: tls.alpn.join(','), fp: tls.fp || (tls.reality ? 'chrome' : ''),
+        pbk: tls.pbk, sid: tls.sid, type: net, path: common.path, host: common.host,
+      };
+      return 'trojan://' + encodeURIComponent(pw) + '@' + h.ip + ':' + port + q(p) + (inb.tag ? '#'+encodeURIComponent(inb.tag) : '');
+    }
+    case 'hysteria2': {
+      const pw = firstUser(inb, ['password']).password || inb.password || '';
+      const p = {
+        sni: tls.sni, insecure: tls.insecure ? '1' : '', alpn: tls.alpn.join(','),
+        obfs: (inb.obfs && inb.obfs.type) || '', 'obfs-password': (inb.obfs && inb.obfs.password) || '',
+      };
+      return 'hysteria2://' + encodeURIComponent(pw) + '@' + h.ip + ':' + port + q(p) + (inb.tag ? '#'+encodeURIComponent(inb.tag) : '');
+    }
+    case 'tuic': {
+      const u = firstUser(inb, ['uuid', 'password']);
+      const p = {
+        congestion_control: inb.congestion_control || 'bbr',
+        alpn: tls.alpn.join(','), sni: tls.sni, allow_insecure: tls.insecure ? '1' : '',
+      };
+      return 'tuic://' + (u.uuid || '') + ':' + encodeURIComponent(u.password || '') + '@' + h.ip + ':' + port + q(p) + (inb.tag ? '#'+encodeURIComponent(inb.tag) : '');
+    }
+    case 'socks': case 'http': case 'mixed': {
+      const u = firstUser(inb, ['username', 'password']);
+      const cred = u.username ? (encodeURIComponent(u.username) + ':' + encodeURIComponent(u.password || '') + '@') : '';
+      const scheme = t === 'http' ? 'http' : 'socks';
+      return scheme + '://' + cred + h.ip + ':' + port + (inb.tag ? '#'+encodeURIComponent(inb.tag) : '');
+    }
+    default:
+      return '';
+  }
+}
+async function shareDialog(tag){
+  if(!state.exitIp){ try{ await refreshStatus(); }catch(_){} }
+  const key = 'inbounds';
+  const inb = (state.config && state.config[key] || []).find(x=>x.tag === tag);
+  if(!inb) return;
+  const link = makeLink(inb);
+  const extra = inb.type === 'tun' ? 'tun 是本地透明代理，没有分享链接' : '';
+  $('#shTitle').textContent = '节点链接 · ' + tag + '（' + inb.type + '）';
+  $('#shNote').textContent = extra || ('地址用当前出口 IP ' + (state.exitIp || '?') + ' + 配置端口 ' + (inb.listen_port || '?') +
+    '；换机器/换 IP 后重新打开本窗口即可，客户端改地址即可用。');
+  $('#shLink').value = link;
+  $('#shRaw').value = JSON.stringify(inb, null, 2);
+  $('#sh').classList.add('on');
+}
+function closeShare(){ $('#sh').classList.remove('on'); }
+async function copyLink(){
+  const v = $('#shLink').value;
+  if(!v) return toast('这个入站没有可用的分享链接','bad');
+  try{ await navigator.clipboard.writeText(v); toast('链接已复制','ok'); }
+  catch(e){
+    const el = $('#shLink'); el.select(); el.setSelectionRange(0, 99999);
+    try{ document.execCommand('copy'); toast('链接已复制','ok'); }
+    catch(_){ toast('复制失败，请手动全选复制','bad'); }
+  }
+}
+function copyPlain(){
+  const el = $('#shLink'); el.select(); el.setSelectionRange(0, 99999);
+  try{ document.execCommand('copy'); toast('已复制','ok'); }catch(_){}
+}
+
 function renderLists(){
   const g = state.graph; if(!g) return;
   const cur = t => (g.edges.find(e=>e.kind==='route'&&e.from===t)||{}).to || '';
@@ -438,7 +623,8 @@ function renderLists(){
     <div class="item"><h3><span class="tag">${PROTO_ICON[i.type]||''} ${esc(i.tag)}</span><span class="pill">${esc(i.type)}</span></h3>
       <div class="meta">${esc(brief('inbound', i))}</div>
       <div class="row"><span class="meta">出站→</span><select onchange="bind('${esc(i.tag)}',this.value)">${outOptions(cur(i.tag),true)}</select></div>
-      <div class="row"><button onclick="openEdit('inbound','${esc(i.tag)}')">编辑</button>
+      <div class="row"><button onclick="shareDialog('${esc(i.tag)}')">节点链接</button>
+        <button onclick="openEdit('inbound','${esc(i.tag)}')">编辑</button>
         <button class="danger" onclick="delObj('inbound','${esc(i.tag)}')">删除</button></div>
     </div>`).join('') || '<div class="meta">没有入站</div>';
 
@@ -1003,6 +1189,7 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
 });
 $('#modal').addEventListener('click', e=>{ if(e.target.id==='modal') closeModal(); });
 $('#acct').addEventListener('click', e=>{ if(e.target.id==='acct') closeAcct(); });
+$('#sh').addEventListener('click', e=>{ if(e.target.id==='sh') closeShare(); });
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeModal(); });
 loadCerts(); refreshStatus(); loadConfig();
 setInterval(refreshStatus, 3000);
