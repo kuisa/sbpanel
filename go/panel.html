@@ -513,7 +513,8 @@ function makeLink(inb){
   const common = {
     type: net, path: net ? tr.path : '', host: net ? tr.host : '',
     serviceName: (net === 'grpc') ? tr.svc : '',
-    sni: tls.on ? tls.sni : '', alpn: tls.on ? tls.alpn : '',
+    sni: tls.on ? tls.sni : '',
+    alpn: (tls.on && Array.isArray(tls.alpn)) ? tls.alpn : [],   // 必须是数组
     fp: tls.fp || (tls.reality ? 'chrome' : ''), security: '', pbk: '', sid: '',
   };
   if(tls.reality) common.security = 'reality';
@@ -535,7 +536,7 @@ function makeLink(inb){
         v: '2', ps: inb.tag || 'vmess', add: h.raw, port: String(port), id: u.uuid || '',
         aid: '0', scy: 'auto', net: net || 'tcp', type: 'none',
         host: tr.host || '', path: tr.path || '',
-        tls: tls.on ? 'tls' : '', sni: tls.sni || '', alpn: tls.alpn.join(',') || '',
+        tls: tls.on ? 'tls' : '', sni: tls.sni || '', alpn: (tls.alpn||[]).join(','),
         fp: tls.fp || '',
       };
       return 'vmess://' + b64url(JSON.stringify(o));
@@ -545,7 +546,7 @@ function makeLink(inb){
       const flow = (firstUser(inb, ['flow']).flow) || '';
       const p = {
         type: net || 'tcp', encryption: 'none',
-        security: common.security, sni: common.sni, alpn: common.alpn.join(','),
+        security: common.security, sni: common.sni, alpn: (common.alpn||[]).join(','),
         fp: common.fp, pbk: common.pbk, sid: common.sid,
         flow: flow, path: common.path, host: common.host, serviceName: common.serviceName,
       };
@@ -555,7 +556,7 @@ function makeLink(inb){
       const pw = firstUser(inb, ['password']).password || inb.password || '';
       const p = {
         security: tls.on ? (tls.reality ? 'reality' : 'tls') : '',
-        sni: tls.sni, alpn: tls.alpn.join(','), fp: tls.fp || (tls.reality ? 'chrome' : ''),
+        sni: tls.sni, alpn: (tls.alpn||[]).join(','), fp: tls.fp || (tls.reality ? 'chrome' : ''),
         pbk: tls.pbk, sid: tls.sid, type: net, path: common.path, host: common.host,
       };
       return 'trojan://' + encodeURIComponent(pw) + '@' + h.ip + ':' + port + q(p) + (inb.tag ? '#'+encodeURIComponent(inb.tag) : '');
@@ -563,7 +564,7 @@ function makeLink(inb){
     case 'hysteria2': {
       const pw = firstUser(inb, ['password']).password || inb.password || '';
       const p = {
-        sni: tls.sni, insecure: tls.insecure ? '1' : '', alpn: tls.alpn.join(','),
+        sni: tls.sni, insecure: tls.insecure ? '1' : '', alpn: (tls.alpn||[]).join(','),
         obfs: (inb.obfs && inb.obfs.type) || '', 'obfs-password': (inb.obfs && inb.obfs.password) || '',
       };
       return 'hysteria2://' + encodeURIComponent(pw) + '@' + h.ip + ':' + port + q(p) + (inb.tag ? '#'+encodeURIComponent(inb.tag) : '');
@@ -572,7 +573,7 @@ function makeLink(inb){
       const u = firstUser(inb, ['uuid', 'password']);
       const p = {
         congestion_control: inb.congestion_control || 'bbr',
-        alpn: tls.alpn.join(','), sni: tls.sni, allow_insecure: tls.insecure ? '1' : '',
+        alpn: (tls.alpn||[]).join(','), sni: tls.sni, allow_insecure: tls.insecure ? '1' : '',
       };
       return 'tuic://' + (u.uuid || '') + ':' + encodeURIComponent(u.password || '') + '@' + h.ip + ':' + port + q(p) + (inb.tag ? '#'+encodeURIComponent(inb.tag) : '');
     }
@@ -591,8 +592,12 @@ async function shareDialog(tag){
   const key = 'inbounds';
   const inb = (state.config && state.config[key] || []).find(x=>x.tag === tag);
   if(!inb) return;
-  const link = makeLink(inb);
-  const extra = inb.type === 'tun' ? 'tun 是本地透明代理，没有分享链接' : '';
+  let link = '', err = '';
+  try { link = makeLink(inb); }
+  catch(e){ err = e.message; }
+  const extra = inb.type === 'tun' ? 'tun 是本地透明代理，没有分享链接'
+              : (err ? ('这个入站生成链接失败：' + err + '（可以到「原始 JSON」页签手动查看配置）')
+                     : (link ? '' : '这个协议暂时不支持生成分享链接'));
   $('#shTitle').textContent = '节点链接 · ' + tag + '（' + inb.type + '）';
   $('#shNote').textContent = extra || ('地址用当前出口 IP ' + (state.exitIp || '?') + ' + 配置端口 ' + (inb.listen_port || '?') +
     '；换机器/换 IP 后重新打开本窗口即可，客户端改地址即可用。');
@@ -603,7 +608,7 @@ async function shareDialog(tag){
 function closeShare(){ $('#sh').classList.remove('on'); }
 async function copyLink(){
   const v = $('#shLink').value;
-  if(!v) return toast('这个入站没有可用的分享链接','bad');
+  if(!v) return toast('没有可复制的链接（' + ($('#shNote').textContent||'该协议不支持') + '）','bad');
   try{ await navigator.clipboard.writeText(v); toast('链接已复制','ok'); }
   catch(e){
     const el = $('#shLink'); el.select(); el.setSelectionRange(0, 99999);
