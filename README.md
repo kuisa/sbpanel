@@ -59,7 +59,7 @@ sudo ./install.sh --node                                # 面板用 Node 版运�
 一条命令带参数（注意 `-s --`）：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kuisa/sbpanel/main/install.sh | sudo bash -s -- --user admin --password 'kof97boss' --port 3223
+curl -fsSL https://raw.githubusercontent.com/kuisa/sbpanel/main/install.sh | sudo bash -s -- --user admin --password 'admin123' --port 3222
 ```
 
 ### 各系统差异
