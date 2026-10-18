@@ -1,5 +1,6 @@
-#!/usr/bin/env bash
-# sbpanel 一键安装脚本（面板 + sing-box），兼容 systemd / OpenRC(Alpine) / 无服务管理器
+#!/bin/sh
+# sbpanel 一键安装脚本（面板 + sing-box）——纯 POSIX sh，busybox / bash / dash 都能直接跑
+# 兼容 systemd / OpenRC(Alpine) / 无服务管理器
 #
 # 装完直接打印面板地址、用户名和密码。
 # sing-box 用仓库里的 1.12.12 压缩二进制（amd64 / arm64），不需要 dpkg，Alpine 也能装。
@@ -15,7 +16,8 @@
 #   sudo ./install.sh --node                             # 面板用 Node 版运行（需 node>=18）
 #
 # 一条命令（不需要先克隆仓库，所有文件从仓库 raw 地址取）:
-#   curl -fsSL https://raw.githubusercontent.com/kuisa/sbpanel/main/install.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/kuisa/sbpanel/main/install.sh | sudo sh
+#   bash <(curl -Ls https://raw.githubusercontent.com/kuisa/sbpanel/main/install.sh)   # 也可以这样
 #
 set -eu
 
@@ -63,16 +65,14 @@ die()  { printf '\033[1;31m[x]\033[0m %s\n' "$*" >&2; exit 1; }
 
 [ "$(id -u)" = "0" ] || die "请用 root 运行（sudo ./install.sh 或 curl ... | sudo sh）"
 
-# ---------- Alpine 依赖（Alpine 自带 bash/curl/wget 都没有，先装上）----------
+# ---------- Alpine 依赖 ----------
+# 脚本本身只用 POSIX sh 语法（busybox 可直接跑），所以不需要「装完 bash 再自举」。
+# 装 bash/curl/wget 只是为了后续操作方便（某些流程与用户习惯用到 bash）。
 if [ -f /etc/alpine-release ] && command -v apk >/dev/null 2>&1; then
-  [ -z "${SB_REEXEC:-}" ] && log "检测到 Alpine（$(cat /etc/alpine-release)）：安装 bash curl wget"
-  apk update >/dev/null 2>&1 || true
-  apk add --no-cache bash curl wget >/dev/null 2>&1 || warn "apk add 失败，继续用现有工具"
-  # 装上 bash 后用 bash 重新执行自己，保证后续语法可用
-  if command -v bash >/dev/null 2>&1 && [ -z "${SB_REEXEC:-}" ]; then
-    export SB_REEXEC=1
-    exec bash "$0" "$@"
-  fi
+  log "检测到 Alpine（$(cat /etc/alpine-release)）：确保 bash / curl / wget 可用"
+  command -v curl >/dev/null 2>&1 || apk add --no-cache curl >/dev/null 2>&1 || true
+  command -v bash >/dev/null 2>&1 || apk add --no-cache bash >/dev/null 2>&1 || true
+  command -v wget >/dev/null 2>&1 || apk add --no-cache wget >/dev/null 2>&1 || true
 fi
 
 # ---------- 环境探测 ----------
@@ -111,8 +111,8 @@ fetch() { # fetch <url> <outfile>
 port_owner() { # port_owner <port> -> "进程名" 或空
   local p="$1" out=""
   if command -v ss >/dev/null 2>&1; then
-    out="$(ss -tulnH "sport = :$p" 2>/dev/null | grep -o 'users:((\"[^\"]*\"' | head -1)"
-    [ -z "$out" ] && out="$(ss -tulnH "sport = :$p" 2>/dev/null | head -1)"
+    out="$(ss -tulnH "sport = :$p" 2>/dev/null | sed -n 's/.*users:((("\([^"]*\)".*/\1/p' | head -1)"
+    [ -z "$out" ] && out="$(ss -tulnH "sport = :$p" 2>/dev/null | head -1 | tr -s " ")"
   fi
   if [ -z "$out" ] && command -v netstat >/dev/null 2>&1; then
     out="$(netstat -tuln 2>/dev/null | awk -v P=":$p" '$4 ~ P {print $NF; exit}')"
@@ -460,22 +460,28 @@ else
 fi
 
 # ---------- 地址提示 ----------
-IPLIST="$(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 || true)"
-[ -z "$IPLIST" ] && IPLIST="$(ip -4 addr show scope global 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 || true)"
-PUB="$(echo "$IPLIST" | grep -vE '^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)' | head -1 || true)"
+# 列出本机所有可用的访问地址：公网 IPv4 优先，其次内网 IPv4，最后 IPv6
+ALLV4="$(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 || true)"
+[ -z "$ALLV4" ] && ALLV4="$(ip -4 addr show scope global 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 || true)"
+PUB="$(echo "$ALLV4" | grep -vE '^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)' | head -1 || true)"
+LAN="$(echo "$ALLV4" | grep -E '^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)' | head -1 || true)"
 IPV6="$(ip -6 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1 || true)"
 
 echo
 echo "──────────────────────────────────────────────"
 echo " sbpanel 安装完成"
 if [ -n "$PUB" ]; then
-  echo " 面板地址 : http://$PUB:$PORT"
-elif [ -n "$IPV6" ]; then
-  echo " 面板地址 : http://[$IPV6]:$PORT   （本机没有公网 IPv4，走 IPv6）"
+  echo " 面板地址 : http://$PUB:$PORT   ← 公网"
+elif [ -n "$LAN" ]; then
+  echo " 面板地址 : http://$LAN:$PORT   ← 内网/私网（NAT 机器通常从外部映射访问）"
 else
   echo " 面板地址 : http://<主机IP>:$PORT"
 fi
-[ -n "$IPLIST" ] && echo " （本机地址: $(echo $IPLIST | tr '\n' ' ')）"
+# 其它可用地址也列出来，方便 NAT / 隧道机器判断该用哪个
+OTHERS=""
+[ -n "$LAN" ] && [ "$LAN" != "$PUB" ] && OTHERS="$LAN"
+[ -n "$IPV6" ] && OTHERS="${OTHERS:+$OTHERS }[$IPV6]"
+[ -n "$OTHERS" ] && echo " 其它地址 : $OTHERS"
 echo " 用户名   : $USER_NAME"
 echo " 密  码   : $PASSWORD"
 [ "${GENERATED:-0}" = "1" ] && echo " （自动生成的，建议记下来；改 $ENVF 后重启面板生效）"

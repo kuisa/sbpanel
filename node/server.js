@@ -456,12 +456,14 @@ function derive(pass, saltB64, iter) {
 
 function verifyCredentials(user, pass) {
   if (!user && !pass) return false;
-  const envPass = process.env.PANEL_PASSWORD || '';
-  if (envPass) {
-    return user === envUser() && crypto.timingSafeEqual(Buffer.from(String(pass)), Buffer.from(envPass));
-  }
+  // 凭据文件优先（面板里改过的存在这里），没有文件时才用环境变量
   const af = loadAuthFile();
-  if (!af) return false;
+  if (!af) {
+    const envPass = process.env.PANEL_PASSWORD || '';
+    if (!envPass) return false;
+    const a = Buffer.from(String(pass)), b = Buffer.from(envPass);
+    return user === envUser() && a.length === b.length && crypto.timingSafeEqual(a, b);
+  }
   if (user !== af.user) return false;
   const got = derive(String(pass), af.salt, af.iter);
   const want = Buffer.from(af.hash, 'base64');
@@ -492,12 +494,33 @@ function saveCredentials(user, password) {
   authCache.clear();
 }
 
+const ENV_FILE = process.env.PANEL_ENV_FILE || '/etc/sbpanel.env';
+
+function syncEnvFile(user, pass) {
+  let txt;
+  try { txt = fs.readFileSync(ENV_FILE, 'utf8'); } catch (_) { return; }
+  const lines = txt.replace(/\n$/, '').split('\n');
+  let seenU = false, seenP = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].startsWith('PANEL_USER=')) { lines[i] = 'PANEL_USER=' + user; seenU = true; }
+    else if (lines[i].startsWith('PANEL_PASSWORD=')) { lines[i] = 'PANEL_PASSWORD=' + pass; seenP = true; }
+  }
+  if (!seenU) lines.push('PANEL_USER=' + user);
+  if (!seenP) lines.push('PANEL_PASSWORD=' + pass);
+  const tmp = ENV_FILE + '.tmp';
+  fs.writeFileSync(tmp, lines.join('\n') + '\n', { mode: 0o600 });
+  try { fs.chmodSync(tmp, 0o600); } catch (_) {}
+  fs.renameSync(tmp, ENV_FILE);
+}
+
 function changeCredentials(oldPass, user, password) {
   if (!authConfigured()) throw new Error('尚未配置凭据');
-  if (process.env.PANEL_PASSWORD) throw new Error('当前密码来自环境变量 PANEL_PASSWORD，请改 /etc/sbpanel.env 后重启面板');
   const af = loadAuthFile();
-  if (!af || !verifyCredentials(af.user, oldPass)) throw new Error('原密码不正确');
+  const cur = af ? af.user : envUser();
+  if (!verifyCredentials(cur, oldPass)) throw new Error('当前密码不正确');
   saveCredentials(user, password);
+  try { syncEnvFile(user, password); }
+  catch (e) { throw new Error('账号已生效，但写回 ' + ENV_FILE + ' 失败（重启后会回到旧账号）: ' + e.message); }
 }
 
 function listBackups() {
@@ -726,8 +749,9 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/auth/state' && req.method === 'GET') {
       let user = envUser(), source = 'env';
-      if (!process.env.PANEL_PASSWORD) { source = 'file'; const af = loadAuthFile(); if (af) user = af.user; }
-      return send(res, 200, { configured: true, user, source });
+      const af = loadAuthFile();
+      if (af) { user = af.user; source = 'file'; }
+      return send(res, 200, { configured: true, user, source, can_change: true, auth_file: AUTH_FILE, env_file: ENV_FILE });
     }
 
     if (p === '/api/auth/change' && req.method === 'POST') {
