@@ -107,6 +107,47 @@ fetch() { # fetch <url> <outfile>
   fi
 }
 
+# 检查配置里的监听端口是否已被别的进程占用（Alpine 上 ss 可能没有，退回 netstat）
+port_owner() { # port_owner <port> -> "进程名" 或空
+  local p="$1" out=""
+  if command -v ss >/dev/null 2>&1; then
+    out="$(ss -tulnH "sport = :$p" 2>/dev/null | grep -o 'users:((\"[^\"]*\"' | head -1)"
+    [ -z "$out" ] && out="$(ss -tulnH "sport = :$p" 2>/dev/null | head -1)"
+  fi
+  if [ -z "$out" ] && command -v netstat >/dev/null 2>&1; then
+    out="$(netstat -tuln 2>/dev/null | awk -v P=":$p" '$4 ~ P {print $NF; exit}')"
+  fi
+  printf '%s' "$out" | tr -d '\n'
+}
+
+check_port_conflicts() { # check_port_conflicts <config.json>
+  local cfg="$1" ports p owner bad=0
+  [ -f "$cfg" ] || return 0
+  ports="$(grep -o '"listen_port"[[:space:]]*:[[:space:]]*[0-9]\+' "$cfg" 2>/dev/null | grep -o '[0-9]\+$' | sort -un)"
+  for p in $ports; do
+    owner="$(port_owner "$p")"
+    if [ -n "$owner" ]; then
+      warn "端口 $p 已被占用（$owner），sing-box 会因此启动失败"
+      bad=1
+    fi
+  done
+  if [ "$bad" = "1" ]; then
+    warn "请在面板「入站」里改掉冲突的监听端口，或先停掉占用端口的服务。"
+  fi
+  return 0
+}
+
+show_start_failure() { # 启动失败时把关键日志打出来，省得用户自己翻
+  local unit="$1"
+  echo "----- sing-box 最近日志 -----"
+  if [ "$HAS_SYSTEMD" = "1" ]; then
+    journalctl -u "$unit" -n 8 --no-pager 2>/dev/null | tail -8
+  elif [ -f /var/log/sing-box.log ]; then
+    tail -8 /var/log/sing-box.log
+  fi
+  echo "-----------------------------"
+}
+
 put_file() { # put_file <src> <dst> <mode>
   rm -f "$2"
   cp -f "$1" "$2" 2>/dev/null || cat "$1" > "$2"
@@ -206,6 +247,9 @@ install_singbox() {
     fi
   fi
 
+  # 启动前先看端口有没有被占（最常见的就是 8080 被 webssh/面板类服务占了）
+  check_port_conflicts /etc/sing-box/config.json
+
   # 服务
   if [ "$SB_SERVICE" != "none" ]; then
     if [ "$HAS_SYSTEMD" = "1" ]; then
@@ -230,7 +274,12 @@ WantedBy=multi-user.target
 EOF
       systemctl daemon-reload 2>/dev/null || true
       systemctl enable sing-box >/dev/null 2>&1 || true
-      systemctl restart sing-box 2>/dev/null || warn "sing-box 启动失败：journalctl -u sing-box -n 30"
+      systemctl restart sing-box 2>/dev/null || true
+      sleep 1
+      if [ "$(systemctl is-active sing-box 2>/dev/null)" != "active" ]; then
+        warn "sing-box 启动失败"
+        show_start_failure sing-box
+      fi
     elif [ "$HAS_OPENRC" = "1" ]; then
       cat > /etc/init.d/sing-box <<EOF
 #!/sbin/openrc-run
@@ -246,7 +295,9 @@ EOF
       chmod 0755 /etc/init.d/sing-box
       rc-update add sing-box default >/dev/null 2>&1 || true
       if [ -d /run/openrc ]; then
-        rc-service sing-box restart >/dev/null 2>&1 || warn "sing-box 启动失败：cat /var/log/sing-box.log"
+        rc-service sing-box restart >/dev/null 2>&1 || true
+        sleep 1
+        rc-service sing-box status 2>/dev/null | grep -q started || { warn "sing-box 启动失败"; show_start_failure sing-box; }
       else
         warn "无 OpenRC 运行环境：直接启动 sing-box"
         nohup "$SB_BIN" run -c /etc/sing-box/config.json >/var/log/sing-box.log 2>&1 &
