@@ -16,36 +16,68 @@ sing-box 的 Web 控制面板：**启停 / 热重载**、**可视化编辑 `conf
 
 ## 一键安装
 
+**方式一：一条命令（推荐，不用先克隆）**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kuisa/sbpanel/main/install.sh | sudo bash
+```
+
+适用 Debian / Ubuntu / CentOS / Arch 等（有 systemd 的系统直接跑这条即可）。
+
+**Alpine（含 NAT 小鸡）**：先补上 bash 和 curl（Alpine 默认没有），再跑：
+
+```bash
+apk update && apk add --no-cache bash curl wget
+curl -fsSL https://raw.githubusercontent.com/kuisa/sbpanel/main/install.sh | sudo bash
+```
+
+> 脚本自己也会检测 Alpine 并尝试 `apk add bash curl wget`；但你手动先装好更稳妥。
+> 用 `sudo bash` 而不是 `sudo sh` —— Alpine 上 `/bin/sh` 是 busybox，脚本按 bash 写。
+
+**方式二：克隆后本地跑（可以改脚本再装）**
+
 ```bash
 git clone https://github.com/kuisa/sbpanel.git
 cd sbpanel
 sudo ./install.sh
 ```
 
-装完会打印**面板地址、用户名和密码**。也可以一条命令：
+两种方式装完都会打印**面板地址、用户名和密码**。
+
+### 常用参数
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kuisa/sbpanel/main/install.sh | sudo bash
-```
-
-常用参数：
-
-```bash
-sudo ./install.sh --user admin --password 'admin123'   # 指定账号密码
+sudo ./install.sh --user admin --password 'kof97boss'   # 指定账号密码
 sudo ./install.sh --port 3223                           # 换端口
 sudo ./install.sh --singbox-url https://.../sing-box     # 用你自己的 sing-box 直链
 sudo ./install.sh --no-singbox                          # 不装 sing-box（你自己已经有）
-sudo ./install.sh --force-singbox                       # 已装也用包里的版本覆盖
-sudo ./install.sh --service none                        # 不用 systemd 管 sing-box，面板自己拉起进程
+sudo ./install.sh --force-singbox                       # 已装也覆盖成仓库里的版本
+sudo ./install.sh --service none                        # 不用 systemd/OpenRC 管 sing-box，面板自己拉起进程
 sudo ./install.sh --node                                # 面板用 Node 版运行
 ```
 
+一条命令带参数（注意 `-s --`）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kuisa/sbpanel/main/install.sh | sudo bash -s -- --user admin --password 'kof97boss' --port 3223
+```
+
+### 各系统差异
+
+| 系统 | 服务管理 | 说明 |
+|---|---|---|
+| Debian / Ubuntu / CentOS / Arch | systemd | `systemctl {status,restart,stop} sbpanel` |
+| **Alpine** | OpenRC | 先 `apk add bash curl wget`；服务用 `rc-service sbpanel {status,restart,stop}` |
+| 容器 / chroot（无真 init） | 无 | 脚本会直接拉起面板并如实报告 `direct(手动)` |
+
+**sing-box 来源**：优先用你自己的 `--singbox-url`，否则用仓库里的 **1.12.12 压缩二进制**（amd64 15.6 MB / arm64 14.2 MB），**不需要 dpkg、不需要编译**，任何 Linux 都能装。已装过 sing-box 的机器不会被动（除非 `--force-singbox`）。
+
 安装脚本做了什么：
 
-1. 系统里没有 `sing-box` → 从 `third_party/sing-box/` 里取对应架构的**压缩二进制**装上（没有 gunzip 才退到用官方 deb 解包），建 `sing-box` 用户、装 systemd 单元、写一份只监听 `127.0.0.1:7890` 的示例配置并 `enable --now`；已有则不动
-2. 按架构选 `dist/` 里的面板二进制（没有就去 GitHub Releases 下，再不行用本机 Go 编译）装到 `/usr/local/bin/sbpanel`
+1. 系统里没有 `sing-box` → 取对应架构的**压缩二进制**（15.6/14.2 MB）装到 `/usr/local/bin/sing-box`，建 `sing-box` 用户、装服务单元（systemd 或 OpenRC）、写一份只监听 `127.0.0.1:7890` 的示例配置并启动；已有则不动
+2. 面板二进制装到 `/usr/local/bin/sbpanel`（从仓库 `dist/` 下载；本地有包就用本地的）
 3. 写 `/etc/sbpanel.env`（权限 600，放端口 / 账号 / 密码 / 配置路径）——**已存在时会沿用其中的密码和用户名**
-4. 写 `/etc/systemd/system/sbpanel.service` 并 `enable --now`
+4. 按系统装服务：systemd 用 `sbpanel.service`；Alpine 用 `/etc/init.d/sbpanel`（OpenRC）；都没有则直接拉起
 5. 打印访问地址、用户名、密码
 
 ## 前置条件
