@@ -47,7 +47,7 @@ sudo ./install.sh
 ### 常用参数
 
 ```bash
-sudo ./install.sh --user admin --password 'kof97boss'   # 指定账号密码
+sudo ./install.sh --user admin --password 'admin123'   # 指定账号密码
 sudo ./install.sh --port 3223                           # 换端口
 sudo ./install.sh --singbox-url https://.../sing-box     # 用你自己的 sing-box 直链
 sudo ./install.sh --no-singbox                          # 不装 sing-box（你自己已经有）
