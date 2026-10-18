@@ -44,6 +44,7 @@ type env struct {
 
 var E env
 var useSystemd bool
+var useOpenRC bool
 
 func initEnv() {
 	E = env{
@@ -55,7 +56,9 @@ func initEnv() {
 		Service:    def(os.Getenv("SINGBOX_SERVICE"), "sing-box"),
 		LogFile:    def(os.Getenv("SINGBOX_LOG"), "/tmp/sing-box.log"),
 	}
-	useSystemd = E.Service != "" && E.Service != "none"
+	useSystemd = E.Service != "" && E.Service != "none" && hasSystemd()
+	// 没有 systemd 时看有没有 OpenRC（Alpine 等）；两者都没有就由面板自己管进程
+	useOpenRC = !useSystemd && E.Service != "" && E.Service != "none" && hasOpenRC()
 }
 
 func def(v, d string) string {
@@ -571,6 +574,23 @@ func isIPish(s string) bool {
 
 /* --------------------------------------------------------- sing-box 控制 */
 
+func hasSystemd() bool {
+	if _, err := os.Stat("/run/systemd/system"); err != nil {
+		return false
+	}
+	_, err := exec.LookPath("systemctl")
+	return err == nil
+}
+
+func hasOpenRC() bool {
+	if _, err := exec.LookPath("rc-service"); err != nil {
+		return false
+	}
+	// 容器/chroot 里 openrc 没有接管 init，rc-service 会拒绝执行
+	_, err := os.Stat("/run/openrc")
+	return err == nil
+}
+
 func binAvailable() bool {
 	if _, err := exec.LookPath(E.Bin); err == nil {
 		return true
@@ -661,6 +681,18 @@ func serviceState() map[string]any {
 		}
 		return st
 	}
+	if useOpenRC {
+		_, out, _ := run("rc-service", E.Service, "status")
+		txt := strings.TrimSpace(out)
+		running := strings.Contains(txt, "started")
+		pid := findPid()
+		st["mode"] = "openrc"
+		st["unit"] = E.Service
+		st["state"] = map[bool]string{true: "active", false: "inactive"}[running]
+		st["running"] = running
+		st["pid"] = pid
+		return st
+	}
 	pid := findPid()
 	st["mode"] = "process"
 	st["unit"] = E.Service
@@ -668,6 +700,14 @@ func serviceState() map[string]any {
 	st["running"] = pid > 0
 	st["pid"] = pid
 	return st
+}
+
+func tailLines(s string, n int) string {
+	all := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(all) > n {
+		all = all[len(all)-n:]
+	}
+	return strings.Join(all, "\n")
 }
 
 func checkConfig() (bool, string) {
@@ -708,6 +748,35 @@ func control(action string) (bool, string) {
 		}
 		if ok, st := waitActive(6 * time.Second); !ok {
 			return false, "命令已执行但服务未进入 active（当前 " + st + "）：检查配置与日志"
+		}
+		return true, msg
+	}
+	if useOpenRC {
+		if action == "reload" {
+			// openrc 的 reload 语义依服务而定，直接给 sing-box 发 HUP（它支持热重载）
+			pid := findPid()
+			if pid <= 0 {
+				return false, "服务没在运行，无法 reload"
+			}
+			if err := syscall.Kill(pid, syscall.SIGHUP); err != nil {
+				return false, "发送 HUP 失败: " + err.Error()
+			}
+			return true, "已 reload（SIGHUP）"
+		}
+		code, out, errs := run("rc-service", E.Service, action)
+		msg := strings.TrimSpace(out + errs)
+		if msg == "" {
+			msg = action + " 完成"
+		}
+		if code != 0 {
+			return false, msg
+		}
+		if action != "stop" {
+			time.Sleep(700 * time.Millisecond)
+			_, st2, _ := run("rc-service", E.Service, "status")
+			if !strings.Contains(st2, "started") {
+				return false, "命令已执行但服务未启动（rc-service status 显示未运行）：检查配置与日志"
+			}
 		}
 		return true, msg
 	}
@@ -763,6 +832,14 @@ func logs(lines int) string {
 			return out
 		}
 		return strings.TrimSpace(errs) + "\n(journalctl 不可用)"
+	}
+	if useOpenRC {
+		for _, f := range []string{"/var/log/sing-box.log", E.LogFile} {
+			if b, err := os.ReadFile(f); err == nil {
+				return tailLines(string(b), lines)
+			}
+		}
+		return "(暂无日志：OpenRC 模式下请查看 /var/log/sing-box.log)"
 	}
 	b, err := os.ReadFile(E.LogFile)
 	if err != nil {
@@ -1508,6 +1585,8 @@ func main() {
 	fmt.Printf("  配置: %s\n", E.ConfigPath)
 	if useSystemd {
 		fmt.Printf("  控制: systemd %s\n", E.Service)
+	} else if useOpenRC {
+		fmt.Printf("  控制: OpenRC %s\n", E.Service)
 	} else {
 		fmt.Printf("  控制: 直接进程 (%s)\n", E.Bin)
 	}
