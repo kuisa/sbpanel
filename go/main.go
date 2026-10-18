@@ -1496,13 +1496,13 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 	case p == "/api/auth/state" && r.Method == "GET":
 		user, src := envUser(), "env"
-		if os.Getenv("PANEL_PASSWORD") == "" {
-			src = "file"
-			if af, err := loadAuthFile(); err == nil {
-				user = af.User
-			}
+		if af, err := loadAuthFile(); err == nil {
+			user, src = af.User, "file"
 		}
-		jsonResp(w, 200, map[string]any{"configured": true, "user": user, "source": src})
+		jsonResp(w, 200, map[string]any{
+			"configured": true, "user": user, "source": src,
+			"can_change": true, "auth_file": authFilePath(), "env_file": envFilePath(),
+		})
 
 	case p == "/api/auth/change" && r.Method == "POST":
 		body, err := readBody(r)
@@ -1510,7 +1510,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			jsonResp(w, 400, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}
-		if err := changeCredentials(body.str("old_password"), body.str("user"), body.str("password")); err != nil {
+		if err := changeCredentials(body.str("old_user"), body.str("old_password"), body.str("user"), body.str("password")); err != nil {
 			jsonResp(w, 400, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}

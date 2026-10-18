@@ -184,7 +184,7 @@ code{background:#0c1424;border:1px solid var(--line);border-radius:5px;padding:1
 <div class="modal" id="acct"><div class="box" style="max-width:460px">
   <h3>面板账号</h3>
   <div class="fields" style="grid-template-columns:1fr">
-    <div class="f"><label>当前密码</label><input id="ac_old" type="password" autocomplete="current-password"></div>
+    <div class="f"><label>当前密码（验证身份用）</label><input id="ac_old" type="password" autocomplete="current-password"></div>
     <div class="f"><label>用户名</label><input id="ac_user" autocomplete="username"></div>
     <div class="f"><label>新密码（至少 6 位）</label><input id="ac_pass" type="password" autocomplete="new-password"></div>
     <div class="f"><label>再输一次新密码</label><input id="ac_pass2" type="password" autocomplete="new-password"></div>
@@ -266,13 +266,10 @@ async function restoreBackup(name){
 async function accountDialog(){
   try{
     const st = await api('/api/auth/state');
-    if(st.source === 'env'){
-      toast('当前账号来自环境变量（PANEL_USER / PANEL_PASSWORD）。\n要改请编辑 /etc/sbpanel.env 里的这两项，然后：systemctl restart sbpanel','ok');
-      return;
-    }
     $('#ac_user').value = st.user || 'admin';
     $('#ac_old').value = $('#ac_pass').value = $('#ac_pass2').value = '';
-    $('#ac_note').textContent = '账号存在 /etc/sbpanel-auth.json（PBKDF2 加盐哈希）';
+    $('#ac_note').textContent = '改完立即生效（会同时写回 ' + (st.env_file || '/etc/sbpanel.env') +
+      ' 和 ' + (st.auth_file || '/etc/sbpanel-auth.json') + '，重启也不会丢）';
     $('#acct').classList.add('on');
   }catch(e){ toast(e.message,'bad'); }
 }
@@ -284,7 +281,8 @@ async function saveAccount(){
   if(pass !== pass2) return toast('两次输入的新密码不一致','bad');
   try{
     const r = await api('/api/auth/change',{method:'POST',body:JSON.stringify({old_password:oldPass, user, password:pass})});
-    toast(r.msg||'已更新','ok'); closeAcct();
+    closeAcct();
+    toast('账号已更新，立即生效。\n浏览器会继续用旧凭据直到重新登录 —— 请关闭本页后重新打开，用新账号登录。','ok');
   }catch(e){ toast(e.message,'bad'); }
 }
 

@@ -112,15 +112,15 @@ func verifyCredentials(user, pass string) bool {
 	if user == "" && pass == "" {
 		return false
 	}
-	// 1) 环境变量
-	if envPass := os.Getenv("PANEL_PASSWORD"); envPass != "" {
-		uOK := subtle.ConstantTimeCompare([]byte(user), []byte(envUser())) == 1
-		pOK := subtle.ConstantTimeCompare([]byte(pass), []byte(envPass)) == 1
-		return uOK && pOK
-	}
-	// 2) 凭据文件
+	// 凭据文件优先（面板里改过的账号存在这里，重启后也不丢）；
+	// 没有文件时才回退到环境变量 PANEL_USER / PANEL_PASSWORD。
 	af, err := loadAuthFile()
 	if err != nil {
+		if envPass := os.Getenv("PANEL_PASSWORD"); envPass != "" {
+			uOK := subtle.ConstantTimeCompare([]byte(user), []byte(envUser())) == 1
+			pOK := subtle.ConstantTimeCompare([]byte(pass), []byte(envPass)) == 1
+			return uOK && pOK
+		}
 		return false
 	}
 	uOK := subtle.ConstantTimeCompare([]byte(user), []byte(af.User)) == 1
@@ -203,18 +203,63 @@ func saveCredentials(user, password string) error {
 }
 
 // 改密码/换用户名（已登录后用）
-func changeCredentials(oldPass, newUser, newPass string) error {
+func changeCredentials(oldUser, oldPass, newUser, newPass string) error {
 	if !authConfigured() {
 		return fmt.Errorf("尚未配置凭据")
 	}
-	// 校验旧密码（环境变量模式下不允许改，避免和 env 打架）
-	if os.Getenv("PANEL_PASSWORD") != "" {
-		return fmt.Errorf("当前密码来自环境变量 PANEL_PASSWORD，请改 /etc/sbpanel.env 后重启面板")
+	// 用「当前生效的账号」校验旧密码（env 模式也能改）
+	cur := envUserIfFromFile()
+	if !verifyCredentials(cur, oldPass) {
+		return fmt.Errorf("当前密码不正确")
 	}
-	if !verifyCredentials(envUserIfFromFile(), oldPass) {
-		return fmt.Errorf("原密码不正确")
+	if err := saveCredentials(newUser, newPass); err != nil {
+		return err
 	}
-	return saveCredentials(newUser, newPass)
+	// 同步写回 /etc/sbpanel.env，避免重启后 env 里的旧值把新账号顶回去
+	if err := syncEnvFile(newUser, newPass); err != nil {
+		return fmt.Errorf("账号已生效，但写回 %s 失败（重启后会回到旧账号）: %v", envFilePath(), err)
+	}
+	return nil
+}
+
+// 把新的账号密码写回 /etc/sbpanel.env（保留其它行）
+func envFilePath() string {
+	if v := strings.TrimSpace(os.Getenv("PANEL_ENV_FILE")); v != "" {
+		return v
+	}
+	return "/etc/sbpanel.env"
+}
+
+func syncEnvFile(user, pass string) error {
+	path := envFilePath()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil // 没有这个文件就不管（比如用户自己用环境变量启动的）
+	}
+	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+	seenU, seenP := false, false
+	for i, l := range lines {
+		if strings.HasPrefix(l, "PANEL_USER=") {
+			lines[i] = "PANEL_USER=" + user
+			seenU = true
+		} else if strings.HasPrefix(l, "PANEL_PASSWORD=") {
+			lines[i] = "PANEL_PASSWORD=" + pass
+			seenP = true
+		}
+	}
+	if !seenU {
+		lines = append(lines, "PANEL_USER="+user)
+	}
+	if !seenP {
+		lines = append(lines, "PANEL_PASSWORD="+pass)
+	}
+	out := strings.Join(lines, "\n") + "\n"
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(out), 0o600); err != nil {
+		return err
+	}
+	_ = os.Chmod(tmp, 0o600)
+	return os.Rename(tmp, path)
 }
 
 func envUserIfFromFile() string {
