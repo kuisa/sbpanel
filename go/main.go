@@ -1532,6 +1532,15 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		}
 		jsonResp(w, 200, res)
 
+	case p == "/api/reality/pubkey" && r.Method == "POST":
+		body, _ := readBody(r)
+		pub, err := deriveRealityPublicKey(body.str("private_key"))
+		if err != nil {
+			jsonResp(w, 400, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		jsonResp(w, 200, map[string]any{"ok": true, "public_key": pub})
+
 	case p == "/api/gen/reality" && r.Method == "POST":
 		res, err := genRealityKeypair()
 		if err != nil {

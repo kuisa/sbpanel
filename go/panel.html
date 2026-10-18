@@ -75,6 +75,10 @@ pre{background:#0c1424;border:1px solid var(--line);border-radius:10px;padding:1
 .users{border:1px solid var(--line);border-radius:10px;padding:10px;background:#0f1728}
 .urow{display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap}
 .urow input{flex:1;min-width:120px}
+.keys{margin:.3rem 0 .6rem}
+.keys .krow{display:flex;align-items:center;gap:.4rem;margin:.25rem 0}
+.keys .klab{flex:0 0 9rem;font-size:.78rem;opacity:.75;text-align:left}
+.keys input{flex:1;min-width:0;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.76rem}
 .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
 .toast{position:fixed;right:18px;bottom:18px;display:flex;flex-direction:column;gap:8px;z-index:60}
 .toast div{background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--acc);border-radius:8px;padding:10px 14px;max-width:460px;box-shadow:0 8px 30px rgba(0,0,0,.4);white-space:pre-wrap}
@@ -169,6 +173,7 @@ code{background:#0c1424;border:1px solid var(--line);border-radius:5px;padding:1
     <button id="segJson" onclick="setSeg('json')">JSON（高级）</button>
     <span class="spacer"></span>
     <button class="mini ghost" onclick="certTools()">证书工具…</button>
+    <div id="certBox" class="keys" style="display:none"></div>
   </div>
   <div id="mFormWrap"><div class="fields" id="mForm"></div>
     <div class="sect" id="mUsersSect" style="display:none">用户 / 凭证（每个用户一组）</div>
@@ -471,14 +476,18 @@ function firstUser(inb, keys){
 }
 function tlsOf(inb){
   const t = inb.tls || {};
+  const r = t.reality || {};
+  // short_id 在服务端配置里是数组，链接里要字符串
+  const sid = Array.isArray(r.short_id) ? (r.short_id[0] || '') : (r.short_id || '');
   return {
     on: !!t.enabled,
     sni: t.server_name || '',
     alpn: Array.isArray(t.alpn) ? t.alpn : [],
     insecure: !!t.insecure,
-    reality: !!(t.reality && t.reality.enabled),
-    pbk: (t.reality && t.reality.public_key) || '',
-    sid: (t.reality && t.reality.short_id) || '',
+    reality: !!(r.enabled),
+    pbk: r.public_key || '',
+    priv: r.private_key || '',
+    sid: sid,
     fp: (t.utls && t.utls.fingerprint) || '',
   };
 }
@@ -517,7 +526,7 @@ function makeLink(inb){
   };
   if(tls.reality) common.security = 'reality';
   else if(tls.on) common.security = 'tls';
-  if(tls.reality){ common.pbk = tls.pbk; common.sid = tls.sid; }
+  if(tls.reality){ common.pbk = tls.pbk || tls.derivedPub || ''; common.sid = tls.sid; }
 
   switch(t){
     case 'shadowsocks': {
@@ -585,20 +594,44 @@ function makeLink(inb){
       return '';
   }
 }
+// 服务端配置只存 Reality 私钥；客户端要的 public_key 由私钥推导（X25519），结果缓存在内存
+const _pubCache = {};
+async function ensureRealityPubkey(inb){
+  const tls = tlsOf(inb);
+  if(!tls.reality) return '';
+  if(tls.pbk) return tls.pbk;
+  if(!tls.priv) return '';
+  if(_pubCache[tls.priv] !== undefined) return _pubCache[tls.priv];
+  try{
+    const r = await api('/api/reality/pubkey',{method:'POST',body:JSON.stringify({private_key:tls.priv})});
+    _pubCache[tls.priv] = r.public_key || '';
+  }catch(_){ _pubCache[tls.priv] = ''; }
+  return _pubCache[tls.priv];
+}
 async function shareDialog(tag){
   if(!state.exitIp){ try{ await refreshStatus(); }catch(_){} }
   const key = 'inbounds';
   const inb = (state.config && state.config[key] || []).find(x=>x.tag === tag);
   if(!inb) return;
+  // Reality：服务端只存私钥，公钥现场推导后合进链接
+  const pub = await ensureRealityPubkey(inb);
+  let target = inb;
+  if(pub){
+    target = JSON.parse(JSON.stringify(inb));
+    target.tls = target.tls || {};
+    target.tls.reality = Object.assign({}, target.tls.reality, {public_key: pub});
+  }
   let link = '', err = '';
-  try { link = makeLink(inb); }
+  try { link = makeLink(target); }
   catch(e){ err = e.message; }
   const extra = inb.type === 'tun' ? 'tun 是本地透明代理，没有分享链接'
               : (err ? ('这个入站生成链接失败：' + err + '（可以到「原始 JSON」页签手动查看配置）')
                      : (link ? '' : '这个协议暂时不支持生成分享链接'));
   $('#shTitle').textContent = '节点链接 · ' + tag + '（' + inb.type + '）';
+  const rk = tlsOf(inb);
+  const rnPart = (rk.reality && pub) ? ('\nReality 公钥（客户端 public_key）：' + pub) : '';
   $('#shNote').textContent = extra || ('地址用当前出口 IP ' + (state.exitIp || '?') + ' + 配置端口 ' + (inb.listen_port || '?') +
-    '；换机器/换 IP 后重新打开本窗口即可，客户端改地址即可用。');
+    '；换机器/换 IP 后重新打开本窗口即可，客户端改地址即可用。' + rnPart);
   $('#shLink').value = link;
   $('#shRaw').value = JSON.stringify(inb, null, 2);
   $('#sh').classList.add('on');
@@ -688,7 +721,9 @@ const TLS_OUT = [
 ];
 /* 入站传输（vless/vmess/trojan 套 ws / gRPC / http 时需要） */
 const TRANSPORT_IN = [
-  F('transport.type','传输方式','select',{opts:['','ws','grpc','http','httpupgrade'],g:G_TP,d:'留空 = 不额外套传输'}),
+  F('transport.type','传输方式','select',{opts:['','ws','grpc','http','httpupgrade'],
+    optLabels:{'':'raw / TCP（默认，Reality 和普通 TLS 都用这个）'},
+    g:G_TP,d:'sing-box 里 raw = 不写 transport。选它就不用管路径/Host；只有套 CDN 或特殊需求才选 ws/grpc/http/httpupgrade'}),
   F('transport.path','路径（path）','text',{ph:'/ws',g:G_TP,d:'要和客户端一致'}),
   F('transport.host','主机名（仅 HTTP 传输用，逗号分隔）','list',{ph:'example.com',g:G_TP,d:'只有 HTTP 传输用'}),
   F('transport.service_name','gRPC 服务名','text',{ph:'GunService',g:G_TP,d:'只有 gRPC 传输用'}),
@@ -696,7 +731,9 @@ const TRANSPORT_IN = [
   F('multiplex.enabled','启用多路复用','bool',{g:G_TP,d:'多条连接复用到一条'}),
 ];
 const TRANSPORT_OUT = [
-  F('transport.type','传输方式','select',{opts:['','ws','grpc','http','httpupgrade'],g:G_TP,d:'留空 = 不额外套传输'}),
+  F('transport.type','传输方式','select',{opts:['','ws','grpc','http','httpupgrade'],
+    optLabels:{'':'raw / TCP（默认，Reality 和普通 TLS 都用这个）'},
+    g:G_TP,d:'sing-box 里 raw = 不写 transport。选它就不用管路径/Host；只有套 CDN 或特殊需求才选 ws/grpc/http/httpupgrade'}),
   F('transport.path','路径（path）','text',{ph:'/ws',g:G_TP,d:'要和客户端一致'}),
   F('transport.host','主机名（仅 HTTP 传输用，逗号分隔）','list',{ph:'example.com',g:G_TP,d:'只有 HTTP 传输用'}),
   F('transport.service_name','gRPC 服务名','text',{ph:'GunService',g:G_TP,d:'只有 gRPC 传输用'}),
@@ -764,7 +801,7 @@ const USER_SPEC = {
 };
 const LISTEN = [
   F('tag','标签（tag）','text',{req:1,ph:'mixed-in',g:G_BASE}),
-  F('listen','监听地址','text',{ph:'0.0.0.0',g:G_BASE}),
+  F('listen','监听地址','text',{ph:'0.0.0.0',def:'0.0.0.0',g:G_BASE,d:'留空会默认绑 127.0.0.1（只有本机能连）；要给外部客户端用请填 0.0.0.0'}),
   F('listen_port','监听端口','num',{ph:'443',g:G_BASE}),
 ];
 const SRV = [
@@ -912,6 +949,11 @@ function switchType(proto){
   e.proto = proto; e.obj = keepTag ? {tag:keepTag} : {};
   renderForm();
 }
+// 新建入站时给「监听地址」预填 0.0.0.0（空值会让 sing-box 只绑 127.0.0.1，外网连不上）
+function applyListenDefault(){
+  const el = document.getElementById('fld_listen');
+  if(el && !el.value.trim()) el.value = '0.0.0.0';
+}
 function fieldInput(f, val, idx){
   const id = 'fld_'+f.k.replace(/\./g,'__')+(idx==null?'':('_'+idx));
   const v = val==null ? '' : val;
@@ -926,7 +968,8 @@ function fieldInput(f, val, idx){
       return `<input id="${id}" value="${esc(Array.isArray(v)?v.join(', '):v)}" placeholder="${esc(f.ph||'逗号分隔')}">`;
     case 'select': {
       const s = String(v||'');
-      const opts = (f.opts||[]).map(o=>`<option value="${esc(o)}" ${o===s?'selected':''}>${o===''?'（默认）':esc(o)}</option>`).join('');
+      const lbl = (o)=> (f.optLabels && f.optLabels[o]) ? f.optLabels[o] : (o==='' ? '（默认）' : o);
+      const opts = (f.opts||[]).map(o=>`<option value="${esc(o)}" ${o===s?'selected':''}>${esc(lbl(o))}</option>`).join('');
       return `<select id="${id}">${opts}</select>`;
     }
     case 'uuid':
@@ -934,7 +977,8 @@ function fieldInput(f, val, idx){
     case 'pass':
       return `<div class="in"><input id="${id}" value="${esc(v)}" placeholder="${esc(f.ph||'密码')}"><button class="mini" onclick="fill('${id}', genPass(16))">随机</button></div>`;
     case 'realitykey':
-      return `<div class="in"><input id="${id}" value="${esc(v)}" placeholder="点右边生成"><button class="mini" onclick="genReality()">生成密钥对</button></div>`;
+      return `<div class="in"><input id="${id}" value="${esc(v)}" placeholder="点右边生成"><button class="mini" id="genRealityBtn" onclick="genReality()">生成密钥对</button></div>
+        <div id="realityKeys" class="keys" style="display:none"></div>`;
     case 'cert':
     case 'key':
       return `<div class="in"><input id="${id}" list="certlist_${f.t}" value="${esc(v)}" placeholder="/etc/sing-box/certs/x.crt">
@@ -977,6 +1021,16 @@ function renderForm(){
     document.body.appendChild(d);
   }
   tlsToggle();
+  if(e.kind === 'inbound') applyListenDefault();
+  // 域名一改，Reality 的伪装目标跟着改（除非用户自己动过伪装目标）
+  const snEl = document.getElementById('fld_tls__server_name');
+  const hsEl = document.getElementById('fld_tls__reality__handshake__server');
+  if(hsEl) hsEl.addEventListener('input', ()=>{ hsEl.dataset.touched = '1'; });
+  if(snEl) snEl.addEventListener('input', ()=>{
+    const rc = document.getElementById('fld_tls__reality__enabled');
+    const hs = document.getElementById('fld_tls__reality__handshake__server');
+    if(rc && rc.checked && hs && hs.dataset.touched !== '1') hs.value = snEl.value.trim();
+  });
 }
 function tlsToggle(){
   // TLS 关闭时把证书类字段灰掉；Reality 开启时证书字段必须禁用
@@ -989,19 +1043,75 @@ function tlsToggle(){
     if(el){ el.disabled = !tlsOn || rcOn; el.title = rcOn ? 'Reality 模式不需要证书，两者不能同时用' : ''; }
   });
   const sn = document.getElementById('fld_tls__server_name'); if(sn) sn.disabled = !tlsOn;
+  if(rcOn) realityAutoFill();
   const note = document.getElementById('tlsNote');
   if(note){
-    if(rcOn) note.textContent = 'Reality 模式：不要填证书（同时填会 FATAL: certificate is unavailable in reality）。伪装目标填一个能被访问的真实站点，它同时用作客户端 SNI。';
+    if(rcOn) note.textContent = 'Reality 模式：只需要填「证书域名（SNI）」——填一个能访问到的真实站点（例如 www.bing.com）。其余项（伪装目标 / 目标端口 / 短 ID / 私钥）已自动填好，不用改。证书不要填（同时填会 FATAL: certificate is unavailable in reality）。';
     else if(!tlsOn) note.textContent = '未启用 TLS：只有 CDN 回源到明文端口（或内网）时才这样配。';
     else note.textContent = 'TLS 模式：需要证书和私钥（证书工具里可以自签或粘贴导入）。';
   }
 }
+function randHex(n){ let out=''; const h='0123456789abcdef';
+  for(let i=0;i<n;i++) out += h[Math.floor(Math.random()*16)]; return out; }
+// 打开 Reality 后自动把「除了域名以外」的项都填好：伪装目标、目标端口、短 ID、私钥
+let _realityLock = false;
+async function realityAutoFill(){
+  const rc = document.getElementById('fld_tls__reality__enabled');
+  if(!rc || !rc.checked) return;
+  // Reality 必须配合 tls.enabled：否则 sing-box 会静默忽略整个 tls 段（不报错但连不上）
+  const tlsEn = document.getElementById('fld_tls__enabled');
+  if(tlsEn && !tlsEn.checked) tlsEn.checked = true;
+  const sn = document.getElementById('fld_tls__server_name');
+  const hs = document.getElementById('fld_tls__reality__handshake__server');
+  const hp = document.getElementById('fld_tls__reality__handshake__server_port');
+  const sid = document.getElementById('fld_tls__reality__short_id');
+  const pk = document.getElementById('fld_tls__reality__private_key');
+  // 域名没填就给个能用的默认值（用户只改这一个）
+  if(sn && !sn.value.trim()) sn.value = 'www.bing.com';
+  const dom = (sn && sn.value.trim()) || 'www.bing.com';
+  if(hs && !hs.value.trim()) hs.value = dom;            // 伪装目标跟随域名
+  if(hp && !hp.value) hp.value = '443';
+  if(sid && !sid.value.trim()) sid.value = randHex(16); // 短 ID 自动生成
+  if(pk && !pk.value.trim() && !_realityLock){          // 私钥自动生成
+    _realityLock = true;
+    try{
+      const r = await api('/api/gen/reality',{method:'POST'});
+      pk.value = r.private_key;
+      showKeyResult(r.private_key, r.public_key);
+    }catch(e){ toast('Reality 私钥自动生成失败：'+e.message+'（可点「生成密钥对」重试）','bad'); }
+    finally{ _realityLock = false; }
+  }
+}
 async function genReality(){
+  const btn = document.getElementById('genRealityBtn');
+  if(btn){ btn.disabled = true; btn.textContent = '生成中…'; }
   try{
     const r = await api('/api/gen/reality',{method:'POST'});
     fill('fld_tls__reality__private_key', r.private_key);
-    prompt('服务端私钥已填入表单。\n下面这行是公钥，复制到客户端（Reality 的 public_key）：', r.public_key);
-  }catch(e){ toast(e.message,'bad'); }
+    showKeyResult(r.private_key, r.public_key);
+    toast('已生成 Reality 密钥对：私钥已填到表单，公钥请复制到客户端','ok');
+  }catch(e){
+    toast('生成失败：' + e.message,'bad');
+  }finally{
+    if(btn){ btn.disabled = false; btn.textContent = '生成密钥对'; }
+  }
+}
+// 生成结果显示在表单里（不用 prompt —— 原生弹窗会被浏览器屏蔽，还会卡住页面）
+function showKeyResult(priv, pub){
+  const box = document.getElementById('realityKeys');
+  if(!box) return;
+  box.style.display = '';
+  box.innerHTML = '<div class="krow"><span class="klab">私钥（已填入上面）</span>' +
+      '<input readonly value="' + esc(priv) + '"><button class="mini" onclick="copyVal(this)">复制</button></div>' +
+    '<div class="krow"><span class="klab">公钥（填到客户端）</span>' +
+      '<input readonly id="realityPubKey" value="' + esc(pub) + '"><button class="mini" onclick="copyVal(this)">复制</button></div>' +
+    '<div class="meta">客户端配 Reality 时填：public_key = 上面这串公钥，short_id 和这里保持一致，SNI 填伪装目标域名。</div>';
+}
+function copyVal(btn){
+  const inp = btn.previousElementSibling;
+  inp.select();
+  navigator.clipboard.writeText(inp.value).then(()=>{ btn.textContent='已复制';
+    setTimeout(()=>btn.textContent='复制',1200); }).catch(()=>{ document.execCommand('copy'); btn.textContent='已复制'; });
 }
 function renderUsers(){
   const e = state.editing, us = userSpec(e.kind, e.proto) || [];
@@ -1062,10 +1172,24 @@ function collectInto(obj){
   if(getPath(obj,'tls.reality.enabled')){
     delPath(obj,'tls.certificate_path');
     delPath(obj,'tls.key_path');
+    // Reality 必须配 tls.enabled，否则 sing-box 静默忽略整个 tls 段
+    setPath(obj,'tls.enabled',true);
   }
+  // transport 归一化：
+  //  - 缺 type（只填了路径）→ 整个丢弃，否则 sing-box 报 unknown transport type
+  //  - type 是 tcp/raw → sing-box 没有这两种传输，raw 就是「不写 transport」，直接丢弃
+  if(obj.transport){
+    const tt = String(obj.transport.type || '').toLowerCase();
+    if(!tt || tt === 'tcp' || tt === 'raw' || tt === 'none') delete obj.transport;
+  }
+  // 入站监听地址留空 → sing-box 默认 127.0.0.1，外部客户端连不上
+  if(e.kind === 'inbound' && obj.type !== 'tun' && !obj.listen) obj.listen = '0.0.0.0';
+  // 同理：mux/obfs 等子对象缺 type 也要清掉
   return dropEmpty(obj);
 }
 function resetSeg(){
+  const rk = document.getElementById('realityKeys');
+  if(rk){ rk.style.display = 'none'; rk.innerHTML = ''; }
   // 打开新建/编辑时先把页签状态和文本框重置干净，否则残留状态会把对象冲掉
   state.seg = 'form';
   $('#mJson').value = '';
@@ -1112,6 +1236,11 @@ async function saveObj(){
     Object.keys(data).forEach(k=>{ if(k===e.proto) delete data[k]; });
   }
   if(!data.tag){ toast('必须填 tag','bad'); return; }
+  // 友好提示：填了传输路径却没选传输方式
+  const tr = data.transport;
+  if(!tr && (getPath(e.obj,'transport.path') || getPath(e.obj,'transport.service_name'))){
+    toast('提示：你填了传输路径/服务名但没选「传输方式」，已忽略这些传输设置（Reality 通常不需要传输方式）','ok');
+  }
   try{
     const r = await api('/api/object',{method:'POST',body:JSON.stringify({kind:e.kind, original:e.tag, data})});
     toast('已保存','ok'); afterWrite(r); closeModal(); loadConfig();
@@ -1124,28 +1253,46 @@ async function loadCerts(){
   try{ state.certs = await api('/api/certs'); }catch(_){ state.certs = null; }
 }
 async function certTools(){
+  await loadCerts();
   const info = state.certs || {};
-  const txt = prompt('证书工具\n\n证书目录: '+ (info.dir||'')
-    + '\n已发现: ' + ((info.pairs||[]).map(p=>p.name).join(', ')||'无')
-    + '\n\n输入要自签的域名（例如 bing.com），我会生成 cert+key 并填进表单；\n想导入自己的证书请在下面输入：名=你给的名字（不改就点取消）', 'bing.com');
-  if(txt===null) return;
-  if(!txt.includes('=')){
-    try{
-      const r = await api('/api/certs/selfsigned',{method:'POST',body:JSON.stringify({domain:txt, name:txt})});
-      await loadCerts();
-      const cEl = $('#fld_tls__certificate_path') || $('#fld_tls__certificate_path');
-      if(document.getElementById('fld_tls__certificate_path')) fill('fld_tls__certificate_path', r.certificate_path);
-      if(document.getElementById('fld_tls__key_path')) fill('fld_tls__key_path', r.key_path);
-      toast(r.msg + '\n' + r.certificate_path + '\n' + r.key_path, 'ok');
-    }catch(e){ toast(e.message,'bad'); }
-  }
+  const box = document.getElementById('certBox');
+  const pairs = info.pairs || [];
+  box.innerHTML =
+    '<div class="meta">证书目录：' + esc(info.dir||'') + '</div>' +
+    (pairs.length
+      ? '<div class="keys">' + pairs.map(p=>'<div class="krow"><span class="klab">' + esc(p.name) + '</span>' +
+          '<input readonly value="' + esc(p.certificate_path) + '" title="证书路径">' +
+          '<button class="mini" onclick="usePair(' + JSON.stringify(p).replace(/"/g,'&quot;') + ')">用这对</button></div>').join('') + '</div>'
+      : '<div class="meta">证书目录里还没有证书。</div>') +
+    '<div class="f"><label>自签域名（CN / SAN）</label>' +
+      '<div class="in"><input id="certDomain" placeholder="例如 bing.com" value="bing.com">' +
+      '<button class="mini" onclick="doSelfSigned()">生成自签证书</button></div></div>' +
+    '<div class="meta">生成后自动填入表单的证书 / 私钥路径。也可以把已有的证书粘贴进配置（见 README）。</div>';
+  box.style.display = '';
 }
-async function quickSelfSigned(fieldId){
-  const cur = document.getElementById(fieldId);
-  const domain = prompt('自签证书的域名（CN / SAN）', 'bing.com');
-  if(!domain) return;
+function usePair(p){
+  if(document.getElementById('fld_tls__certificate_path')) fill('fld_tls__certificate_path', p.certificate_path);
+  if(document.getElementById('fld_tls__key_path')) fill('fld_tls__key_path', p.key_path);
+  toast('已填入证书路径：' + p.name, 'ok');
+}
+async function doSelfSigned(){
+  const domain = (document.getElementById('certDomain').value || '').trim();
+  if(!domain) return toast('请先填域名','bad');
+  const btn = event && event.target; if(btn){ btn.disabled = true; btn.textContent = '生成中…'; }
   try{
     const r = await api('/api/certs/selfsigned',{method:'POST',body:JSON.stringify({domain, name:domain})});
+    await loadCerts(); await certTools();
+    if(document.getElementById('fld_tls__certificate_path')) fill('fld_tls__certificate_path', r.certificate_path);
+    if(document.getElementById('fld_tls__key_path')) fill('fld_tls__key_path', r.key_path);
+    toast(r.msg + '\n' + r.certificate_path + '\n' + r.key_path, 'ok');
+  }catch(e){ toast(e.message,'bad'); }
+  finally{ if(btn){ btn.disabled = false; btn.textContent = '生成自签证书'; } }
+}
+async function quickSelfSigned(fieldId){
+  const box = document.getElementById('certBox');
+  if(box){ certTools(); box.scrollIntoView({block:'nearest'}); return; }
+  try{
+    const r = await api('/api/certs/selfsigned',{method:'POST',body:JSON.stringify({domain:'bing.com', name:'bing.com'})});
     await loadCerts();
     if(fieldId.includes('certificate')) fill('fld_tls__certificate_path', r.certificate_path);
     if(fieldId.includes('key')) fill('fld_tls__key_path', r.key_path);
