@@ -2,7 +2,11 @@
 
 sing-box 的 Web 控制面板：**启停 / 热重载**、**可视化编辑 `config.json`**、**导出 / 导入 / 备份恢复**、**入站→出站绑定与链式（detour）**、**CPU / 内存 / 磁盘 / 出口 IP 监控**、**证书工具**。
 
-随包附带**固定版本 sing-box 1.12.12**（amd64 / arm64，裸二进制 + gzip），一键脚本在系统里没有 sing-box 时自动装上（含 systemd 单元和一份只监听本机的示例配置），所以一台干净的机器也能一条命令跑起来。
+安装时自动装**固定版本 sing-box 1.12.12**（amd64 / arm64），一键脚本在系统里没有可用的 sing-box 时自动下载（含 systemd / OpenRC 单元和一份只监听本机的示例配置），所以一台干净的机器也能一条命令跑起来。
+
+sing-box 二进制**不放进仓库**（GitHub 网页上传单文件上限 25MB，44MB 的二进制传不上去），
+默认从自建文件站 `https://netjett-de.kof95zip.pp.ua` 下载裸二进制，取不到时回落到
+GitHub 官方 Release 流式解压，再不行才用官方安装脚本。
 
 两种运行方式，功能与界面完全一致：
 
@@ -27,7 +31,7 @@ curl -fsSL https://raw.githubusercontent.com/kuisa/sbpanel/main/install.sh | sud
 **Alpine（含 NAT 小鸡）**：先补上 bash 和 curl（Alpine 默认没有），再跑：
 
 ```bash
-apk update && apk add --no-cache bash curl wget sudo
+apk update && apk add --no-cache bash curl wget
 curl -fsSL https://raw.githubusercontent.com/kuisa/sbpanel/main/install.sh | sudo bash
 ```
 
@@ -47,7 +51,7 @@ sudo ./install.sh
 ### 常用参数
 
 ```bash
-sudo ./install.sh --user admin --password 'admin123'   # 指定账号密码
+sudo ./install.sh --user admin --password 'kof97boss'   # 指定账号密码
 sudo ./install.sh --port 3223                           # 换端口
 sudo ./install.sh --singbox-url https://.../sing-box     # 用你自己的 sing-box 直链
 sudo ./install.sh --no-singbox                          # 不装 sing-box（你自己已经有）
@@ -59,7 +63,7 @@ sudo ./install.sh --node                                # 面板用 Node 版运�
 一条命令带参数（注意 `-s --`）：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kuisa/sbpanel/main/install.sh | sudo bash -s -- --user admin --password 'admin123' --port 3222
+curl -fsSL https://raw.githubusercontent.com/kuisa/sbpanel/main/install.sh | sudo bash -s -- --user admin --password 'kof97boss' --port 3223
 ```
 
 ### 各系统差异
@@ -201,12 +205,16 @@ install.sh / run.sh / uninstall.sh   一键安装 / 前台运行 / 卸载
 dist/                                面板二进制（amd64、arm64）+ SHA256SUMS
 node/                                Node 版 + 前端源文件（panel.html、setup.html）
 go/                                  Go 版：main.go auth.go backup.go certs.go util.go go.mod build.sh
-third_party/sing-box/                固定版本 sing-box 1.12.12（两个架构的 .gz + systemd 单元 +
-                                     示例配置 + GPL 许可证），供 install.sh 安装
+third_party/sing-box/                systemd 单元 + 示例配置 + GPL 许可证（不含二进制，
+                                     二进制从文件站下载）
 ```
 
-sing-box 想升级就把 `third_party/sing-box/` 里的 `.gz`（或裸二进制）换掉，脚本按
-`sing-box-linux-<arch>` / `sbpanel` 之类的命名规则识别；也可以用 `--singbox-url` 指一个直链。
+**二进制一律直写目标盘，绝不经过 `/tmp`**：安装时用 `curl -o /usr/local/bin/sing-box.part`
+边下边写，内存只占一小块缓冲区。64M/128M 小机器的 `/tmp` 常是 tmpfs（占内存），
+把压缩包下到那里再解压，会被「压缩包 + 解压结果」撑爆，连 sshd 都会被 OOM 杀掉。
+
+想换 sing-box 版本就改 `install.sh` 里的 `SB_VER`，或改 `SB_MIRROR` 指向自己的文件站；
+也可以用 `--singbox-url` 指一个直链。
 
 ## 安全提醒
 

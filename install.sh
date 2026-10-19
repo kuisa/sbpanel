@@ -34,6 +34,9 @@ SB_SERVICE="sing-box"
 ENVF="/etc/sbpanel.env"
 BINDIR="/usr/local/bin"
 SB_BIN="/usr/local/bin/sing-box"
+# 自建文件站（OVH 托管，放裸二进制，不受 GitHub 单文件 25MB 上传限制）
+SB_MIRROR="https://netjett-de.kof95zip.pp.ua"
+SB_VER="1.12.12"
 NODE_DIR="/opt/sbpanel-node"
 USE_NODE=0
 WITH_SINGBOX=1
@@ -161,69 +164,122 @@ get_repo_file() { # get_repo_file <相对路径> <输出文件>  —— 优先�
 }
 
 # ---------- sing-box ----------
-install_singbox() {
-  if command -v sing-box >/dev/null 2>&1 && [ "$FORCE_SINGBOX" != "1" ]; then
-    log "系统已有 sing-box（$(command -v sing-box)，$(sing-box version 2>/dev/null | head -1 | awk '{print $NF}')），跳过（要覆盖加 --force-singbox）"
-    return 0
-  fi
+# 二进制「真的能跑」才算已安装：残缺文件、没有执行位、段错误都视为未安装
+sb_works() {
+  [ -f "$1" ] && [ -x "$1" ] || return 1
+  case "$("$1" version 2>/dev/null | head -1)" in
+    "sing-box version "*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
-  tmp="$(mktemp -d)"
-  used=""
-  src=""
+# 下载到指定文件（直接落到目标盘，绝不经过 /tmp）
+fetch_to() { # fetch_to <url> <dest>
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --connect-timeout 20 --retry 2 -o "$2" "$1"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q -T 60 -O "$2" "$1"
+  else
+    return 127
+  fi
+}
+
+# 关键：全程只写 $SB_BIN.part 一个文件，最后原子替换。
+# 小内存机器（64M/128M）的 /tmp 常是 tmpfs，把 gz 和解压结果放进去会直接 OOM。
+install_singbox_binary() {
+  part="$SB_BIN.part"
+  rm -f "$part"
 
   # 1) 显式直链
   if [ -n "$SINGBOX_URL" ]; then
-    log "sing-box 来源: --singbox-url $SINGBOX_URL"
-    if fetch "$SINGBOX_URL" "$tmp/sb"; then
-      case "$SINGBOX_URL" in
-        *.gz) gunzip -c "$tmp/sb" > "$tmp/sb.raw" 2>/dev/null || gzip -d -c "$tmp/sb" > "$tmp/sb.raw"; src="$tmp/sb.raw" ;;
-        *)    src="$tmp/sb" ;;
-      esac
-      used="url"
-    else
-      warn "从 $SINGBOX_URL 下载失败，改用包内/仓库文件"
+    log "sing-box 来源: --singbox-url"
+    if fetch_to "$SINGBOX_URL" "$part" && chmod 0755 "$part" 2>/dev/null && sb_works "$part"; then
+      mv -f "$part" "$SB_BIN"; log "已安装 sing-box 到 $SB_BIN"; return 0
     fi
+    warn "从 $SINGBOX_URL 取到的 sing-box 不可用，改用其它来源"
+    rm -f "$part"
   fi
 
-  # 2) 包内裸二进制 / 压缩二进制
-  if [ -z "$used" ] && has_local "third_party/sing-box/sing-box-linux-$ARCH"; then
+  # 2) 包内裸二进制
+  if has_local "third_party/sing-box/sing-box-linux-$ARCH"; then
     log "sing-box 来源: 包内裸二进制"
-    src="$HERE/third_party/sing-box/sing-box-linux-$ARCH"; used="local-raw"
-  fi
-  if [ -z "$used" ] && has_local "third_party/sing-box/sing-box-linux-$ARCH.gz"; then
-    log "sing-box 来源: 包内压缩二进制"
-    gunzip -c "$HERE/third_party/sing-box/sing-box-linux-$ARCH.gz" > "$tmp/sb.raw" 2>/dev/null || gzip -d -c "$HERE/third_party/sing-box/sing-box-linux-$ARCH.gz" > "$tmp/sb.raw"
-    src="$tmp/sb.raw"; used="local-gz"
+    cp -f "$HERE/third_party/sing-box/sing-box-linux-$ARCH" "$part" 2>/dev/null && chmod 0755 "$part" 2>/dev/null
+    if sb_works "$part"; then mv -f "$part" "$SB_BIN"; log "已安装 sing-box 到 $SB_BIN"; return 0; fi
+    warn "包内裸二进制不可用"; rm -f "$part"
   fi
 
-  # 3) 仓库 raw 的压缩二进制（1.12.12，amd64/arm64）
-  if [ -z "$used" ]; then
-    case "$ARCH" in
-      amd64|arm64)
-        log "sing-box 来源: 仓库 sing-box-linux-$ARCH.gz（1.12.12）"
-        if fetch "$RAW/third_party/sing-box/sing-box-linux-$ARCH.gz" "$tmp/sb.gz"; then
-          gunzip -c "$tmp/sb.gz" > "$tmp/sb.raw" 2>/dev/null || gzip -d -c "$tmp/sb.gz" > "$tmp/sb.raw"
-          src="$tmp/sb.raw"; used="repo-gz"
-        else
-          warn "仓库里的 sing-box 下载失败"
-        fi
-        ;;
-    esac
-  fi
-
-  # 4) 兜底：官方安装脚本（支持更多架构，但会装较新的版本）
-  if [ -z "$used" ]; then
-    warn "拿不到 $ARCH 的 sing-box，改用官方安装脚本（需要联网，装的是较新版本）"
-    if command -v curl >/dev/null 2>&1; then
-      curl -fsSL https://sing-box.app/install.sh | sh || warn "官方脚本安装失败，可稍后手动装"
+  # 3) 自建文件站（首选：裸二进制，curl -o 直接写目标盘，内存只占小块缓冲区）
+  case "$ARCH" in
+    amd64) mirror_url="$SB_MIRROR/samd64b" ;;
+    arm64) mirror_url="$SB_MIRROR/sarm64b" ;;
+    *)     mirror_url="" ;;
+  esac
+  if [ -n "$mirror_url" ]; then
+    log "sing-box 来源: 文件站（裸二进制，直接写盘）"
+    if fetch_to "$mirror_url" "$part"; then
+      chmod 0755 "$part" 2>/dev/null
+      if sb_works "$part"; then mv -f "$part" "$SB_BIN"; log "已安装 sing-box 到 $SB_BIN"; return 0; fi
+      warn "文件站的 sing-box 不可用"; rm -f "$part"
+    else
+      warn "从文件站下载失败"; rm -f "$part"
     fi
-    rm -rf "$tmp"
-    return 0
   fi
 
-  put_file "$src" "$SB_BIN" 0755
-  rm -rf "$tmp"
-  log "已安装 sing-box 到 $SB_BIN"
+  # 4) 官方 Release：解到真实磁盘的临时目录再取出来（busybox tar 不支持 --wildcards，
+  #    也绝不落到 /tmp —— 那在内存里）
+  case "$ARCH" in
+    amd64|arm64)
+      log "sing-box 来源: 官方 Release v$SB_VER（解压取二进制）"
+      exdir="$(dirname "$SB_BIN")/.sb-extract.$$"
+      rm -rf "$exdir"; mkdir -p "$exdir"
+      tgz="https://github.com/SagerNet/sing-box/releases/download/v$SB_VER/sing-box-$SB_VER-linux-$ARCH.tar.gz"
+      if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --connect-timeout 20 "$tgz" 2>/dev/null | tar -xz -C "$exdir" 2>/dev/null
+      elif command -v wget >/dev/null 2>&1; then
+        wget -q -T 60 -O - "$tgz" 2>/dev/null | tar -xz -C "$exdir" 2>/dev/null
+      fi
+      found="$(find "$exdir" -type f -name sing-box 2>/dev/null | head -1)"
+      if [ -n "$found" ]; then
+        mv -f "$found" "$part"; chmod 0755 "$part" 2>/dev/null
+      fi
+      rm -rf "$exdir"
+      if sb_works "$part"; then mv -f "$part" "$SB_BIN"; log "已安装 sing-box 到 $SB_BIN"; return 0; fi
+      warn "官方 Release 来源不可用"; rm -f "$part"
+      ;;
+  esac
+
+  # 5) 兜底：官方安装脚本
+  warn "拿不到 $ARCH 的 sing-box，改用官方安装脚本（版本较新、体积更大）"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL https://sing-box.app/install.sh | sh || warn "官方脚本安装失败，可稍后手动装"
+  fi
+  return 1
+}
+
+install_singbox() {
+  # 只有真能跑才跳过；残缺/无执行位/段错误的一律重装，
+  # 而且「跳过」也必须往下走去补配置和服务（以前 return 0 导致配置/服务全缺）
+  skip=0
+  if [ "$FORCE_SINGBOX" != "1" ]; then
+    if [ -x "$SB_BIN" ] && sb_works "$SB_BIN"; then
+      log "系统已有可用的 sing-box（$SB_BIN，$(sing-box version 2>/dev/null | head -1)），跳过二进制安装（要覆盖加 --force-singbox）"
+      skip=1
+    elif command -v sing-box >/dev/null 2>&1 && sb_works "$(command -v sing-box)"; then
+      SB_BIN="$(command -v sing-box)"
+      log "系统已有可用的 sing-box（$SB_BIN，$(sing-box version 2>/dev/null | head -1)），跳过二进制安装（要覆盖加 --force-singbox）"
+      skip=1
+    fi
+  fi
+  if [ "$skip" = "0" ]; then
+    if command -v sing-box >/dev/null 2>&1; then
+      warn "现有 sing-box 无法运行（$(command -v sing-box)），重新安装"
+    fi
+    install_singbox_binary || true
+    if ! sb_works "$SB_BIN"; then
+      die "sing-box 安装失败：$SB_BIN 无法运行（可加 --singbox-url 指定下载地址）"
+    fi
+  fi
+
 
   # 系统用户（systemd 单元要 User=sing-box；OpenRC/无服务则不需要）
   if [ "$HAS_SYSTEMD" = "1" ]; then
@@ -321,22 +377,26 @@ if [ "$USE_NODE" = "1" ]; then
   EXEC_START="$(command -v node) $NODE_DIR/server.js"
   log "使用 Node 版: $NODE_DIR/server.js"
 else
-  tmpd="$(mktemp -d)"
+  # 同样直写目标盘，不经过 /tmp（小内存机器 /tmp 是 tmpfs）
+  part="$BINDIR/sbpanel.part"
   got=""
   if has_local "dist/sbpanel-linux-$ARCH"; then
     log "使用仓库内的面板二进制"
-    put_file "$HERE/dist/sbpanel-linux-$ARCH" "$BINDIR/sbpanel" 0755; got=1
+    rm -f "$part"
+    cp -f "$HERE/dist/sbpanel-linux-$ARCH" "$part" && chmod 0755 "$part" && got=1
   fi
   if [ -z "$got" ]; then
     case "$ARCH" in
       amd64|arm64)
         log "从仓库下载面板二进制（dist/sbpanel-linux-$ARCH）"
-        if fetch "$RAW/dist/sbpanel-linux-$ARCH" "$tmpd/sbpanel"; then
-          put_file "$tmpd/sbpanel" "$BINDIR/sbpanel" 0755; got=1
+        rm -f "$part"
+        if fetch_to "$RAW/dist/sbpanel-linux-$ARCH" "$part" && chmod 0755 "$part" && [ -s "$part" ]; then
+          got=1
         else
           warn "仓库下载失败，试 GitHub Releases"
-          if fetch "$REL/sbpanel-linux-$ARCH" "$tmpd/sbpanel"; then
-            put_file "$tmpd/sbpanel" "$BINDIR/sbpanel" 0755; got=1
+          rm -f "$part"
+          if fetch_to "$REL/sbpanel-linux-$ARCH" "$part" && chmod 0755 "$part" && [ -s "$part" ]; then
+            got=1
           fi
         fi
         ;;
@@ -345,10 +405,10 @@ else
   if [ -z "$got" ] && [ -d "$HERE/go" ] && command -v go >/dev/null 2>&1; then
     warn "下载失败，改用本机 Go 编译"
     cp -f "$HERE/node/panel.html" "$HERE/node/setup.html" "$HERE/go/" 2>/dev/null || true
-    ( cd "$HERE/go" && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "$tmpd/sbpanel" . ) && { put_file "$tmpd/sbpanel" "$BINDIR/sbpanel" 0755; got=1; }
+    ( cd "$HERE/go" && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "$part" . ) && got=1
   fi
-  rm -rf "$tmpd"
   [ -n "$got" ] || die "拿不到面板二进制（$ARCH）。这个架构目前只提供 amd64/arm64；其它架构请用 --node 或自行编译"
+  mv -f "$part" "$BINDIR/sbpanel"
   EXEC_START="$BINDIR/sbpanel"
   log "已安装: $BINDIR/sbpanel"
 fi
