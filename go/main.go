@@ -322,10 +322,6 @@ func writeConfig(cfg *omap) error {
 		if sys, ok := st.Sys().(*syscall.Stat_t); ok {
 			uid, gid = int(sys.Uid), int(sys.Gid)
 		}
-		bak := E.ConfigPath + ".bak." + time.Now().UTC().Format("2006-01-02T15-04-05.000Z")
-		if b, err := os.ReadFile(E.ConfigPath); err == nil {
-			_ = os.WriteFile(bak, b, 0o600)
-		}
 	}
 	tmp := filepath.Join(filepath.Dir(E.ConfigPath), fmt.Sprintf(".panel-%d-%d.tmp", os.Getpid(), time.Now().UnixNano()))
 	if err := os.WriteFile(tmp, text, mode); err != nil {
@@ -334,6 +330,21 @@ func writeConfig(cfg *omap) error {
 	_ = os.Chmod(tmp, mode)
 	if uid >= 0 {
 		_ = os.Chown(tmp, uid, gid)
+	}
+
+	// JSON 合法 != sing-box 接受（例如 transport.host 这类未知字段）。
+	// 校验不通过就不落盘：否则会写出一个「服务还活着、下次重启必挂」的坏配置。
+	if binAvailable() {
+		if ok, out := checkConfigFile(tmp); !ok {
+			_ = os.Remove(tmp)
+			return fmt.Errorf("sing-box 校验失败，配置未保存：%s", out)
+		}
+	}
+
+	// 校验通过才备份旧文件并替换
+	bak := E.ConfigPath + ".bak." + time.Now().UTC().Format("2006-01-02T15-04-05.000Z")
+	if b, err := os.ReadFile(E.ConfigPath); err == nil {
+		_ = os.WriteFile(bak, b, 0o600)
 	}
 	return os.Rename(tmp, E.ConfigPath)
 }
@@ -711,7 +722,12 @@ func tailLines(s string, n int) string {
 }
 
 func checkConfig() (bool, string) {
-	code, out, errs := run(E.Bin, "check", "-c", E.ConfigPath)
+	return checkConfigFile(E.ConfigPath)
+}
+
+// checkConfigFile 校验指定配置文件（用于「写入前先验证临时文件」）
+func checkConfigFile(path string) (bool, string) {
+	code, out, errs := run(E.Bin, "check", "-c", path)
 	msg := strings.TrimSpace(out + errs)
 	return code == 0, msg
 }
