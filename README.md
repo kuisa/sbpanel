@@ -31,7 +31,7 @@ curl -fsSL https://raw.githubusercontent.com/kuisa/sbpanel/main/install.sh | sud
 **Alpine（含 NAT 小鸡）**：先补上 bash 和 curl（Alpine 默认没有），再跑：
 
 ```bash
-apk update && apk add --no-cache bash curl wget
+apk update && apk add --no-cache bash curl wget sudo
 curl -fsSL https://raw.githubusercontent.com/kuisa/sbpanel/main/install.sh | sudo bash
 ```
 
