@@ -1181,6 +1181,17 @@ function collectInto(obj){
   if(obj.transport){
     const tt = String(obj.transport.type || '').toLowerCase();
     if(!tt || tt === 'tcp' || tt === 'raw' || tt === 'none') delete obj.transport;
+    // transport.host 只有 HTTP 传输合法；ws / grpc / httpupgrade 必须用 headers.Host
+    else if(tt !== 'http' && obj.transport.host !== undefined){
+      const h = obj.transport.host;
+      const hh = Array.isArray(h) ? h.filter(Boolean) : (h ? [String(h)] : []);
+      if(hh.length){
+        obj.transport.headers = obj.transport.headers || {};
+        if(!obj.transport.headers.Host && !obj.transport.headers.host)
+          obj.transport.headers.Host = hh;
+      }
+      delete obj.transport.host;
+    }
   }
   // 入站监听地址留空 → sing-box 默认 127.0.0.1，外部客户端连不上
   if(e.kind === 'inbound' && obj.type !== 'tun' && !obj.listen) obj.listen = '0.0.0.0';
@@ -1244,7 +1255,10 @@ async function saveObj(){
   try{
     const r = await api('/api/object',{method:'POST',body:JSON.stringify({kind:e.kind, original:e.tag, data})});
     toast('已保存','ok'); afterWrite(r); closeModal(); loadConfig();
-  }catch(err){ toast(err.message,'bad'); }
+  }catch(err){
+    // 后端写入前会做 sing-box check；失败时把完整原因贴出来，别只说“保存失败”
+    toast('保存失败：' + err.message,'bad');
+  }
 }
 function closeModal(){ $('#modal').classList.remove('on'); resetSeg(); }
 

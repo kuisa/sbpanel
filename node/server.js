@@ -77,12 +77,28 @@ function writeConfigAtomic(obj) {
   try {
     const st = fs.statSync(ENV.configPath);
     mode = st.mode & 0o777; uid = st.uid; gid = st.gid;
-    const bak = ENV.configPath + '.bak.' + new Date().toISOString().replace(/[:.]/g, '-');
-    try { fs.copyFileSync(ENV.configPath, bak); } catch (_) {}
   } catch (_) {}
   fs.writeFileSync(tmp, text, { mode });
   try { fs.chmodSync(tmp, mode); } catch (_) {}
   if (uid >= 0) { try { fs.chownSync(tmp, uid, gid); } catch (_) {} }
+
+  // JSON 合法 != sing-box 接受（例如 transport.host 这类未知字段）。
+  // 校验不通过就不落盘：否则会写出「服务还活着、下次重启必挂」的坏配置。
+  let c = { status: 0, stdout: '', stderr: '' };
+  try {
+    c = require('child_process').spawnSync(ENV.bin, ['check', '-c', tmp],
+      { encoding: 'utf8', timeout: 20000 });
+  } catch (_) { c = { status: 0 }; }   // 找不到 sing-box 就不拦，交给后续启动时报错
+  if (c.status !== 0) {
+    try { fs.unlinkSync(tmp); } catch (_) {}
+    throw new Error('sing-box 校验失败，配置未保存：' + ((c.stdout || '') + (c.stderr || '')).trim());
+  }
+
+  // 校验通过才备份旧文件并替换
+  try {
+    const bak = ENV.configPath + '.bak.' + new Date().toISOString().replace(/[:.]/g, '-');
+    try { fs.copyFileSync(ENV.configPath, bak); } catch (_) {}
+  } catch (_) {}
   fs.renameSync(tmp, ENV.configPath);
   return text;
 }
