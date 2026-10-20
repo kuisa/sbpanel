@@ -479,11 +479,14 @@ function tlsOf(inb){
   const r = t.reality || {};
   // short_id 在服务端配置里是数组，链接里要字符串
   const sid = Array.isArray(r.short_id) ? (r.short_id[0] || '') : (r.short_id || '');
+  // 自签证书：客户端必须跳过校验，否则连不上。显式 insecure 或用了本机 certs/ 目录里的证书都算
+  const selfSigned = !!t.insecure ||
+    (!!t.certificate_path && String(t.certificate_path).indexOf('certs/') >= 0);
   return {
     on: !!t.enabled,
     sni: t.server_name || '',
     alpn: Array.isArray(t.alpn) ? t.alpn : [],
-    insecure: !!t.insecure,
+    insecure: selfSigned,
     reality: !!(r.enabled),
     pbk: r.public_key || '',
     priv: r.private_key || '',
@@ -571,16 +574,23 @@ function makeLink(inb){
     case 'hysteria2': {
       const pw = firstUser(inb, ['password']).password || inb.password || '';
       const p = {
-        sni: tls.sni, insecure: tls.insecure ? '1' : '', alpn: (tls.alpn||[]).join(','),
-        obfs: (inb.obfs && inb.obfs.type) || '', 'obfs-password': (inb.obfs && inb.obfs.password) || '',
+        sni: tls.sni || '',
+        insecure: tls.insecure ? '1' : '',
+        alpn: (tls.alpn||[]).join(','),
+        obfs: (inb.obfs && inb.obfs.type) || '',
+        'obfs-password': (inb.obfs && inb.obfs.password) || '',
       };
       return 'hysteria2://' + encodeURIComponent(pw) + '@' + h.ip + ':' + port + q(p) + (inb.tag ? '#'+encodeURIComponent(inb.tag) : '');
     }
     case 'tuic': {
       const u = firstUser(inb, ['uuid', 'password']);
+      const alpn = (tls.alpn && tls.alpn.length) ? tls.alpn.join(',') : 'h3';
       const p = {
         congestion_control: inb.congestion_control || 'bbr',
-        alpn: (tls.alpn||[]).join(','), sni: tls.sni, allow_insecure: tls.insecure ? '1' : '',
+        udp_relay_mode: inb.udp_relay_mode || 'native',
+        alpn: alpn,
+        sni: tls.sni || '',
+        allow_insecure: tls.insecure ? '1' : '',
       };
       return 'tuic://' + (u.uuid || '') + ':' + encodeURIComponent(u.password || '') + '@' + h.ip + ':' + port + q(p) + (inb.tag ? '#'+encodeURIComponent(inb.tag) : '');
     }
@@ -786,6 +796,7 @@ function applyPreset(name){
   const hint = tpl._hint; const data = Object.assign({}, tpl); delete data._hint;
   e.obj = deepMerge(e.obj||{}, data);
   renderForm();
+  if(e.kind === 'inbound') setTimeout(()=>tlsAutoFill(e.proto), 60);
   toast('已套用「'+name+'」' + (hint?('\n'+hint):'\n记得按自己的域名/端口改一下'), 'ok');
 }
 
@@ -948,6 +959,8 @@ function switchType(proto){
   const keepTag = e.obj.tag || '';
   e.proto = proto; e.obj = keepTag ? {tag:keepTag} : {};
   renderForm();
+  // 选 tuic / hy2 就把除 tag、端口、uuid 之外的全填好（证书自动签）
+  if(e.kind === 'inbound') setTimeout(()=>tlsAutoFill(proto), 60);
 }
 // 新建入站时给「监听地址」预填 0.0.0.0（空值会让 sing-box 只绑 127.0.0.1，外网连不上）
 function applyListenDefault(){
@@ -1053,6 +1066,59 @@ function tlsToggle(){
 }
 function randHex(n){ let out=''; const h='0123456789abcdef';
   for(let i=0;i<n;i++) out += h[Math.floor(Math.random()*16)]; return out; }
+// tuic / hy2 一键预填：用户只需要 tag、端口、uuid，其余全部自动生成
+// （TLS 开启、SNI=bing.com、ALPN=h3、拥塞控制 bbr、UDP relay native、自动签发自签证书）
+let _tlsAutoLock = false;
+async function tlsAutoFill(proto){
+  if(proto !== 'tuic' && proto !== 'hysteria2') return;
+  const tlsEn = document.getElementById('fld_tls__enabled');
+  if(tlsEn && !tlsEn.checked) tlsEn.checked = true;
+  const sn = document.getElementById('fld_tls__server_name');
+  if(sn && !sn.value.trim()) sn.value = 'bing.com';       // 默认 SNI，梯子不计较细节
+  const alpn = document.getElementById('fld_tls__alpn');
+  if(alpn && !alpn.value.trim()) alpn.value = 'h3';       // tuic/hy2 必须 h3（QUIC）
+  if(proto === 'tuic'){
+    const cc = document.getElementById('fld_congestion_control');
+    if(cc && !cc.value) cc.value = 'bbr';
+    const ur = document.getElementById('fld_udp_relay_mode');
+    if(ur && !ur.value) ur.value = 'native';
+  }
+  // 证书：没有就自动签一张（bing.com），有就直接填
+  const cp = document.getElementById('fld_tls__certificate_path');
+  const kp = document.getElementById('fld_tls__key_path');
+  if(cp && kp && (!cp.value.trim() || !kp.value.trim()) && !_tlsAutoLock){
+    _tlsAutoLock = true;
+    try{
+      await loadCerts();
+      const want = 'bing.com';
+      const pairs = (state.certs && state.certs.pairs) || [];
+      let hit = pairs.find(x => x.name === want) || pairs.find(x => (x.certificate_path||x.cert||'').includes(want));
+      let certPath, keyPath;
+      if(hit){ certPath = hit.certificate_path || hit.cert; keyPath = hit.key_path || hit.key; }
+      else{
+        const r = await api('/api/certs/selfsigned',{method:'POST',body:JSON.stringify({domain:want, name:want})});
+        certPath = r.certificate_path; keyPath = r.key_path;
+        await loadCerts();
+      }
+      if(certPath){ fill('fld_tls__certificate_path', certPath); fill('fld_tls__key_path', keyPath); }
+    }catch(e){
+      toast('自动签发自签证书失败：' + e.message + '（可在「证书工具」里手动生成）', 'bad');
+    }finally{ _tlsAutoLock = false; }
+  }
+  // uuid 自动生成（tuic 必需；hy2 只用密码）
+  if(proto === 'tuic'){
+    const uu = document.getElementById('fld_uuid');
+    if(uu && !uu.value.trim()) uu.value = genUuid();
+  }
+  // 用户列表：空的话自动补一个（tuic: uuid+密码，hy2: 密码）
+  const cur = state.editing && state.editing.obj ? state.editing.obj.users : null;
+  const empty = !cur || (Array.isArray(cur) && !cur.length);
+  if(empty && !_tlsAutoLock){
+    try{ addUser(); }catch(_){}
+  }
+  tlsToggle();
+}
+
 // 打开 Reality 后自动把「除了域名以外」的项都填好：伪装目标、目标端口、短 ID、私钥
 let _realityLock = false;
 async function realityAutoFill(){
@@ -1285,9 +1351,14 @@ async function certTools(){
   box.style.display = '';
 }
 function usePair(p){
-  if(document.getElementById('fld_tls__certificate_path')) fill('fld_tls__certificate_path', p.certificate_path);
-  if(document.getElementById('fld_tls__key_path')) fill('fld_tls__key_path', p.key_path);
-  toast('已填入证书路径：' + p.name, 'ok');
+  // 后端历史版本只返回 cert/key，这里做兼容兜底，避免填进去是 undefined
+  const cp = p.certificate_path || p.cert || '';
+  const kp = p.key_path || p.key || '';
+  if(!cp || !kp) return toast('这对证书路径不完整，请刷新后重试', 'bad');
+  if(!document.getElementById('fld_tls__certificate_path')) return toast('当前表单没有证书字段（先勾「启用 TLS」）', 'bad');
+  fill('fld_tls__certificate_path', cp);
+  fill('fld_tls__key_path', kp);
+  toast('已填入证书路径：' + (p.name || cp), 'ok');
 }
 async function doSelfSigned(){
   const domain = (document.getElementById('certDomain').value || '').trim();

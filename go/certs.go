@@ -7,13 +7,21 @@ package main
 // 证书目录默认与 config.json 同级的 certs/，可用 SINGBOX_CERT_DIR 覆盖。
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
+	"math/big"
+	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 var certNameRe = regexp.MustCompile(`[^A-Za-z0-9._-]`)
@@ -40,6 +48,10 @@ type certPair struct {
 	Name string `json:"name"`
 	Cert string `json:"cert"`
 	Key  string `json:"key"`
+	// 前端表单用的是 tls.certificate_path / tls.key_path，这里直接给出同名字段，
+	// 免得前端再拼一次（曾经因为字段名不一致，「用这对」填进去是 undefined）
+	CertificatePath string `json:"certificate_path"`
+	KeyPath         string `json:"key_path"`
 }
 
 func listCerts() map[string]any {
@@ -86,7 +98,7 @@ func listCerts() map[string]any {
 		for _, k := range keys {
 			kb := strings.TrimSuffix(filepath.Base(k), filepath.Ext(k))
 			if kb == base || strings.HasPrefix(base, kb) || strings.HasPrefix(kb, base) {
-				pairs = append(pairs, certPair{Name: base, Cert: c, Key: k})
+				pairs = append(pairs, certPair{Name: base, Cert: c, Key: k, CertificatePath: c, KeyPath: k})
 				break
 			}
 		}
@@ -110,10 +122,9 @@ func certSafeName(name, domain string) string {
 	return n
 }
 
+// makeSelfSigned 用 Go 标准库直接生成自签证书（ECDSA P-256，10 年）。
+// 不依赖 openssl —— Alpine / 精简系统上经常没装 openssl。
 func makeSelfSigned(domain, name string) (map[string]any, error) {
-	if _, err := exec.LookPath("openssl"); err != nil {
-		return nil, fmt.Errorf("系统里没有 openssl，无法生成自签证书（也可以自己粘贴证书导入）")
-	}
 	domain = strings.TrimSpace(domain)
 	if domain == "" {
 		domain = "localhost"
@@ -128,18 +139,52 @@ func makeSelfSigned(domain, name string) (map[string]any, error) {
 	if _, err := os.Stat(cert); err == nil {
 		return nil, fmt.Errorf("同名证书已存在: %s", cert)
 	}
-	code, out, errs := run("openssl", "req", "-x509", "-newkey", "ec",
-		"-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes", "-days", "3650",
-		"-keyout", key, "-out", cert,
-		"-subj", "/CN="+domain,
-		"-addext", "subjectAltName=DNS:"+domain)
-	if code != 0 {
-		return nil, fmt.Errorf("openssl 生成失败: %s", strings.TrimSpace(errs+out))
+
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("生成私钥失败: %v", err)
 	}
-	_ = os.Chmod(key, 0o600)
-	_ = os.Chmod(cert, 0o644)
+	serialMax := new(big.Int).Lsh(big.NewInt(1), 128)
+	serial, err := rand.Int(rand.Reader, serialMax)
+	if err != nil {
+		return nil, fmt.Errorf("生成序列号失败: %v", err)
+	}
+	now := time.Now()
+	tmpl := x509.Certificate{
+		SerialNumber:          serial,
+		Subject:               pkix.Name{CommonName: domain, Organization: []string{"sbpanel self-signed"}},
+		NotBefore:             now.Add(-time.Hour),
+		NotAfter:              now.AddDate(10, 0, 0),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	if ip := net.ParseIP(domain); ip != nil {
+		tmpl.IPAddresses = []net.IP{ip}
+	} else {
+		tmpl.DNSNames = []string{domain}
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, &priv.PublicKey, priv)
+	if err != nil {
+		return nil, fmt.Errorf("签发证书失败: %v", err)
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(priv)
+	if err != nil {
+		return nil, fmt.Errorf("编码私钥失败: %v", err)
+	}
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
+	if err := os.WriteFile(cert, certPEM, 0o644); err != nil {
+		return nil, fmt.Errorf("写入证书失败: %v", err)
+	}
+	if err := os.WriteFile(key, keyPEM, 0o600); err != nil {
+		_ = os.Remove(cert)
+		return nil, fmt.Errorf("写入私钥失败: %v", err)
+	}
 	return map[string]any{
 		"ok": true, "certificate_path": cert, "key_path": key, "dir": dir, "domain": domain,
+		"cert_pem": string(certPEM), "key_pem": string(keyPEM),
 		"msg": "已生成自签证书（有效期 10 年）",
 	}, nil
 }
