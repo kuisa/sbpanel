@@ -31,7 +31,7 @@ curl -fsSL https://raw.githubusercontent.com/kuisa/sbpanel/main/install.sh | sud
 **Alpine（含 NAT 小鸡）**：先补上 bash 和 curl（Alpine 默认没有），再跑：
 
 ```bash
-apk update && apk add --no-cache bash curl wget sudo
+apk update && apk add --no-cache bash curl wget
 curl -fsSL https://raw.githubusercontent.com/kuisa/sbpanel/main/install.sh | sudo bash
 ```
 
@@ -51,7 +51,7 @@ sudo ./install.sh
 ### 常用参数
 
 ```bash
-sudo ./install.sh --user admin --password 'admin123'   # 指定账号密码
+sudo ./install.sh --user admin --password 'kof97boss'   # 指定账号密码
 sudo ./install.sh --port 3223                           # 换端口
 sudo ./install.sh --singbox-url https://.../sing-box     # 用你自己的 sing-box 直链
 sudo ./install.sh --no-singbox                          # 不装 sing-box（你自己已经有）
@@ -63,7 +63,7 @@ sudo ./install.sh --node                                # 面板用 Node 版运�
 一条命令带参数（注意 `-s --`）：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kuisa/sbpanel/main/install.sh | sudo bash -s -- --user admin --password 'admin123' --port 3222
+curl -fsSL https://raw.githubusercontent.com/kuisa/sbpanel/main/install.sh | sudo bash -s -- --user admin --password 'kof97boss' --port 3223
 ```
 
 ### 各系统差异
@@ -74,20 +74,48 @@ curl -fsSL https://raw.githubusercontent.com/kuisa/sbpanel/main/install.sh | sud
 | **Alpine** | OpenRC | 先 `apk add bash curl wget`；服务用 `rc-service sbpanel {status,restart,stop}` |
 | 容器 / chroot（无真 init） | 无 | 脚本会直接拉起面板并如实报告 `direct(手动)` |
 
-**sing-box 来源**：优先用你自己的 `--singbox-url`，否则用仓库里的 **1.12.12 压缩二进制**（amd64 15.6 MB / arm64 14.2 MB），**不需要 dpkg、不需要编译**，任何 Linux 都能装。已装过 sing-box 的机器不会被动（除非 `--force-singbox`）。
+**sing-box 来源**（按顺序回落）：`--singbox-url` → 自建文件站（`https://netjett-de.kof95zip.pp.ua/samd64b` / `sarm64b`，固定 **1.12.12** 裸二进制）→ 官方 GitHub Release → 官方安装脚本。**不需要 dpkg、不需要编译**，任何 Linux 都能装。已装过 sing-box 的机器不会被动（除非 `--force-singbox`）。
+
+**小内存机器**：下载全程 `curl -o <目标>.part` 直写目标盘再原子 `mv`，不经过 `/tmp`（64M/128M 小鸡的 `/tmp` 是 tmpfs，放不下 44MB 二进制，会 OOM 连 sshd 一起被杀）。
 
 安装脚本做了什么：
 
-1. 系统里没有 `sing-box` → 取对应架构的**压缩二进制**（15.6/14.2 MB）装到 `/usr/local/bin/sing-box`，建 `sing-box` 用户、装服务单元（systemd 或 OpenRC）、写一份只监听 `127.0.0.1:7890` 的示例配置并启动；已有则不动
+1. 系统里没有 `sing-box`（或已有的跑不起来：无执行位 / 段错误 / `version` 无输出）→ 取对应架构的裸二进制装到 `/usr/local/bin/sing-box`，建 `sing-box` 用户、装服务单元（systemd 或 OpenRC）、写一份只监听 `127.0.0.1:7890` 的示例配置并启动；已有的健康二进制不动
 2. 面板二进制装到 `/usr/local/bin/sbpanel`（从仓库 `dist/` 下载；本地有包就用本地的）
 3. 写 `/etc/sbpanel.env`（权限 600，放端口 / 账号 / 密码 / 配置路径）——**已存在时会沿用其中的密码和用户名**
 4. 按系统装服务：systemd 用 `sbpanel.service`；Alpine 用 `/etc/init.d/sbpanel`（OpenRC）；都没有则直接拉起
 5. 打印访问地址、用户名、密码
 
+## IPv6 / 双栈注意事项
+
+**`0.0.0.0` 只监听 IPv4，IPv6 连不上。** sing-box 的 `listen` 是单协议绑定，实测行为：
+
+| 写法 | 实际监听 | IPv4 | IPv6 |
+|---|---|---|---|
+| `"listen": "0.0.0.0"` | `0.0.0.0:端口` | ✓ | **✗** |
+| `"listen": "::"` | `*:端口`（双栈） | ✓ | ✓ |
+| 不写 `listen` | `127.0.0.1:端口` | 仅本机 | ✗ |
+
+**IPv6-only 机器（NAT 小鸡常见）必须把 `0.0.0.0` 改成 `::`**，否则节点对外不可达。面板新建入站时默认填的是 `0.0.0.0`，需要手工改。
+
+```bash
+# 一次性全改（先备份）
+cp /etc/sing-box/config.json /etc/sing-box/config.json.bak.$(date +%s)
+sed -i 's/"listen": *"0\.0\.0\.0"/"listen": "::"/g' /etc/sing-box/config.json
+sing-box check -c /etc/sing-box/config.json && systemctl restart sing-box
+```
+
+要点：
+
+- `/proc/sys/net/ipv6/bindv6only = 0`（绝大多数 Linux 默认）时 `::` 是双栈，**一个 socket 同时收 v4 和 v6**，直接替换即可，不用写两条入站
+- 若为 `1`，`::` 只收 v6，需要额外加一条 `0.0.0.0` 的入站
+- 改之前先 `ss -lntp | grep :<端口>` 确认没被占用
+- 面板新建入站的「监听地址」留空时也会兜底成 `0.0.0.0`，IPv6 机器记得改
+
 ## 前置条件
 
 - Linux（amd64 / arm64），只要装了 systemd 的发行版都能用
-- **不需要预装 sing-box**（包里带了固定版本；你自己装了的话脚本会检测到并跳过）
+- **不需要预装 sing-box**（脚本会自己下载固定版本 1.12.12；你已经装了能跑的版本就不动它）
 - Node 版额外需要 Node 18+
 
 ## 使用

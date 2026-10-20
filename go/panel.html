@@ -572,13 +572,17 @@ function makeLink(inb){
       return 'trojan://' + encodeURIComponent(pw) + '@' + h.ip + ':' + port + q(p) + (inb.tag ? '#'+encodeURIComponent(inb.tag) : '');
     }
     case 'hysteria2': {
-      const pw = firstUser(inb, ['password']).password || inb.password || '';
+      // hysteria2 的「密码」是任意字符串，塞 UUID 完全合法（机场都这么发）
+      const u = firstUser(inb, ['uuid', 'password']);
+      const pw = u.uuid || u.password || inb.uuid || inb.password || '';
       const p = {
         sni: tls.sni || '',
         insecure: tls.insecure ? '1' : '',
         alpn: (tls.alpn||[]).join(','),
         obfs: (inb.obfs && inb.obfs.type) || '',
         'obfs-password': (inb.obfs && inb.obfs.password) || '',
+        pinSHA256: (inb.tls && inb.tls.pin_sha256) || '',
+        mport: inb.mport || '',
       };
       return 'hysteria2://' + encodeURIComponent(pw) + '@' + h.ip + ':' + port + q(p) + (inb.tag ? '#'+encodeURIComponent(inb.tag) : '');
     }
@@ -807,7 +811,7 @@ const USER_SPEC = {
   vless:      [F('uuid','UUID','uuid'), F('flow','流控','select',{opts:['','xtls-rprx-vision'],d:'配合 TLS/Reality 用 vision'}), F('name','备注','text')],
   vmess:      [F('uuid','UUID','uuid'), F('name','备注','text')],
   trojan:     [F('password','密码','pass'), F('name','备注','text')],
-  hysteria2:  [F('password','密码','pass'), F('name','备注','text')],
+  hysteria2:  [F('uuid','UUID（就是密码）','uuid'), F('name','备注','text')],
   tuic:       [F('uuid','UUID','uuid'), F('password','密码','pass')],
 };
 const LISTEN = [
@@ -1105,8 +1109,8 @@ async function tlsAutoFill(proto){
       toast('自动签发自签证书失败：' + e.message + '（可在「证书工具」里手动生成）', 'bad');
     }finally{ _tlsAutoLock = false; }
   }
-  // uuid 自动生成（tuic 必需；hy2 只用密码）
-  if(proto === 'tuic'){
+  // uuid 自动生成：tuic 用 uuid+密码，hy2 直接拿 uuid 当密码
+  if(proto === 'tuic' || proto === 'hysteria2'){
     const uu = document.getElementById('fld_uuid');
     if(uu && !uu.value.trim()) uu.value = genUuid();
   }
@@ -1232,7 +1236,15 @@ function collectInto(obj){
   });
   if(userSpec(e.kind, e.proto)){
     const us = collectUsers();
-    if(us.length) obj.users = us; else delete obj.users;
+    // hysteria2 的密码字段就是 uuid（任意字符串）；但 sing-box 配置里字段名必须叫 password
+    if(e.proto === 'hysteria2' && us.length){
+      obj.users = us.map(u => {
+        const pw = u.uuid || u.password || '';
+        const o = { password: pw };
+        if(u.name) o.name = u.name;
+        return o;
+      });
+    } else if(us.length){ obj.users = us; } else { delete obj.users; }
   }
   // Reality 与证书互斥：兜底清掉（JSON 页签绕过了界面禁用的场景）
   if(getPath(obj,'tls.reality.enabled')){
