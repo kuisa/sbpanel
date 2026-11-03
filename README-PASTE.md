@@ -38,3 +38,9 @@ systemctl restart sbpanel
 ## 版本确认（重要）
 替换后在浏览器控制台执行：`SBP_BUILD`
 应输出 `paste-v3-20261103`。若输出 undefined，说明加载的还是旧文件（缓存或没替换成功）。
+
+## v7（2026-11-03）
+解析器改为**纯字符串处理**，不再依赖 `new URL()`。
+原因：部分浏览器对 `hysteria2://user:pass@host:port` 这种自定义协议解析会返回空 host，
+导致 server/password 丢失成空壳。现在手工切分 scheme / userinfo / host / port / query / fragment。
+所有协议（hy2、vless、vmess、trojan、ss、tuic、socks、http、anytls）均已验证。

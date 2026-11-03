@@ -1,12 +1,12 @@
 diff --git a/go/panel.html b/go/panel.html
-index 5c58507..2a5a779 100644
+index 5c58507..33ed4bc 100644
 --- a/go/panel.html
 +++ b/go/panel.html
 @@ -87,6 +87,7 @@ code{background:#0c1424;border:1px solid var(--line);border-radius:5px;padding:1
  </style>
  </head>
  <body>
-+<script>window.SBP_BUILD='paste-v6-20261103';</script>
++<script>window.SBP_BUILD='paste-v7-20261103';</script>
  <header>
    <h1>sing-box 控制面板</h1>
    <span class="pill" id="svcPill">状态未知</span>
@@ -49,7 +49,7 @@ index 5c58507..2a5a779 100644
    }
  };
  
-@@ -934,13 +942,246 @@ function userSpec(kind, proto){ return kind === 'inbound' ? (USER_SPEC[proto] ||
+@@ -934,13 +942,235 @@ function userSpec(kind, proto){ return kind === 'inbound' ? (USER_SPEC[proto] ||
  function typeOptions(kind, sel){
    return Object.keys(SCHEMA[kind]).map(p=>`<option value="${p}" ${p===sel?'selected':''}>${SCHEMA[kind][p].icon} ${p}</option>`).join('');
  }
@@ -64,186 +64,175 @@ index 5c58507..2a5a779 100644
 +function _num(v, d){ const n = parseInt(v,10); return isFinite(n) ? n : d; }
 +function _bool(v){ return v==='1' || v==='true' || v===true; }
 +
++function _splitURI(raw){
++  const m = /^([a-zA-Z0-9+.\-]+):\/\/([\s\S]*)$/.exec(raw);
++  if(!m) return null;
++  let scheme = m[1].toLowerCase(), rest = m[2], name = '';
++  const hi = rest.indexOf('#');
++  if(hi >= 0){ try{ name = decodeURIComponent(rest.slice(hi+1)); }catch(e){ name = rest.slice(hi+1); } rest = rest.slice(0, hi); }
++  const q = {};
++  const qi = rest.indexOf('?');
++  if(qi >= 0){
++    for(const [k,v] of new URLSearchParams(rest.slice(qi+1))) q[k.toLowerCase()] = v;
++    rest = rest.slice(0, qi);
++  }
++  rest = rest.replace(/\/+$/,'');
++  let user = '', pass = '', hostpart = rest;
++  const ai = rest.lastIndexOf('@');
++  if(ai >= 0){
++    const ui = rest.slice(0, ai); hostpart = rest.slice(ai+1);
++    const ci = ui.indexOf(':');
++    if(ci >= 0){ user = decodeURIComponent(ui.slice(0,ci)); pass = decodeURIComponent(ui.slice(ci+1)); }
++    else { user = decodeURIComponent(ui); }
++  }
++  let host = hostpart, port = '';
++  const vm = /^\[([^\]]+)\](?::(\d+))?$/.exec(hostpart);
++  if(vm){ host = vm[1]; port = vm[2] || ''; }
++  else {
++    const ci2 = hostpart.lastIndexOf(':');
++    if(ci2 >= 0 && !hostpart.slice(ci2+1).includes(']')){ host = hostpart.slice(0, ci2); port = hostpart.slice(ci2+1); }
++  }
++  return {scheme, user, pass, host, port, q, name};
++}
++
 +function parseShare(raw){
 +  raw = String(raw||'').trim();
 +  if(!raw) return {err:'请粘贴节点链接'};
-+  const mm = raw.match(/^([a-zA-Z0-9]+):\/\/([\s\S]*)$/);
-+  if(!mm) return {err:'不是有效的分享链接（缺少 scheme://）'};
-+  const scheme = mm[1].toLowerCase();
++  const p = _splitURI(raw);
++  if(!p) return {err:'不是有效的分享链接（缺少 scheme://）'};
++  const {scheme, user, pass, host, port, q, name} = p;
++  const tag = name || (host ? host + (port ? '-'+port : '') : scheme);
++  const vnum = (d)=> _num(port, d);
 +
-+  // 拆出 #备注
-+  let body = raw, name = '';
-+  const hi = raw.indexOf('#');
-+  if(hi >= 0){ name = decodeURIComponent(raw.slice(hi+1)) || ''; body = raw.slice(0, hi); }
++  // ---------- hysteria2 / hy2 ----------
++  if(scheme==='hy2' || scheme==='hysteria2'){
++    if(!host) return {err:'链接里没有服务器地址（应为 user:pass@host:port）'};
++    const pw = user + (pass ? ':'+pass : '');
++    const obj = { tag: name || (host+'-'+port), server: host, server_port: vnum(443),
++                  password: pw || q.password || q.auth || '',
++                  tls: { enabled:true, server_name: q.sni || q.peer || host,
++                         insecure: _bool(q.insecure) || _bool(q.allowinsecure), alpn:['h3'] } };
++    if(q.obfs === 'salamander' && (q['obfs-password']||q.obfspassword))
++      obj.obfs = { type:'salamander', password: q['obfs-password']||q.obfspassword };
++    if(q.pinsha256) obj.tls.certificate_public_key_sha256 = [q.pinsha256];
++    return {proto:'hysteria2', obj};
++  }
 +
-+  const getQ = (u)=>{ const q = {}; (u.searchParams||new URLSearchParams()); for(const [k,v] of (u.searchParams||[])) q[k.toLowerCase()] = v; return q; };
-+
-+  try{
-+    // ---------- hysteria2 / hy2 ----------
-+    if(scheme==='hy2' || scheme==='hysteria2'){
-+      const u = new URL(body.replace(/^hy2:/i,'hysteria2:'));
-+      const q = getQ(u);
-+      const pw = decodeURIComponent(u.username||'') + (u.password ? ':'+decodeURIComponent(u.password) : '');
-+      const obj = {
-+        tag: name || (u.hostname + '-' + u.port),
-+        server: u.hostname,
-+        server_port: _num(u.port, 443),
-+        password: pw || q.password || q.auth || '',
-+        tls: { enabled:true, server_name: q.sni || q.peer || u.hostname,
-+               insecure: _bool(q.insecure) || _bool(q.allowinsecure), alpn:['h3'] }
-+      };
-+      if(q.obfs === 'salamander' && (q['obfs-password']||q.obfspassword))
-+        obj.obfs = { type:'salamander', password: q['obfs-password']||q.obfspassword };
-+      if(q.pinSHA256) obj.tls.certificate_public_key_sha256 = [q.pinSHA256];
-+      return {proto:'hysteria2', obj};
-+    }
-+
-+    // ---------- vless ----------
-+    if(scheme==='vless'){
-+      const u = new URL(body);
-+      const q = getQ(u);
-+      const obj = { tag: name || (u.hostname+'-'+u.port), server: u.hostname,
-+                    server_port: _num(u.port,443), uuid: decodeURIComponent(u.username||'') };
-+      if(q.flow) obj.flow = q.flow;
-+      const sec = (q.security||'').toLowerCase();
-+      if(sec==='reality'){
-+        obj.tls = { enabled:true, server_name: q.sni||q.host||u.hostname,
-+                    reality:{ enabled:true, public_key: q.pbk||'', short_id: q.sid||'' } };
-+        if(q.fp) obj.tls.utls = { enabled:true, fingerprint: q.fp };
-+      } else if(sec==='tls' || sec==='xtls'){
-+        obj.tls = { enabled:true, server_name: q.sni||q.host||u.hostname, insecure: _bool(q.allowinsecure) };
-+        if(q.alpn) obj.tls.alpn = q.alpn.split(',').map(x=>x.trim()).filter(Boolean);
-+        if(q.fp) obj.tls.utls = { enabled:true, fingerprint: q.fp };
-+      }
-+      const t = (q.type||'').toLowerCase();
-+      if(t==='ws'){ obj.transport = { type:'ws', path: q.path||'/' };
-+        if(q.host) obj.transport.headers = { Host: q.host }; }
-+      else if(t==='grpc'){ obj.transport = { type:'grpc', service_name: q.servicename||'' }; }
-+      else if(t==='http'||t==='h2'){ obj.transport = { type:'http', path: q.path||'/' };
-+        if(q.host) obj.transport.host = q.host.split(','); }
-+      else if(t==='httpupgrade'){ obj.transport = { type:'httpupgrade', path: q.path||'/' };
-+        if(q.host) obj.transport.headers = { Host: q.host }; }
-+      return {proto:'vless', obj};
-+    }
-+
-+    // ---------- trojan ----------
-+    if(scheme==='trojan'){
-+      const u = new URL(body);
-+      const q = getQ(u);
-+      const obj = { tag: name || (u.hostname+'-'+u.port), server: u.hostname,
-+                    server_port: _num(u.port,443), password: decodeURIComponent(u.username||'') };
-+      obj.tls = { enabled:true, server_name: q.sni||q.peer||u.hostname,
-+                  insecure: _bool(q.allowinsecure)||_bool(q.insecure) };
-+      if(q.alpn) obj.tls.alpn = q.alpn.split(',').map(x=>x.trim()).filter(Boolean);
-+      const t = (q.type||'').toLowerCase();
-+      if(t==='ws'){ obj.transport = { type:'ws', path: q.path||'/' };
-+        if(q.host) obj.transport.headers = { Host: q.host }; }
-+      else if(t==='grpc'){ obj.transport = { type:'grpc', service_name: q.servicename||'' }; }
-+      return {proto:'trojan', obj};
-+    }
-+
-+    // ---------- vmess ----------
-+    if(scheme==='vmess'){
-+      const j = JSON.parse(_b64(body) || '{}');
-+      if(!j.add || !j.id) return {err:'vmess 链接解析失败（base64 内容不完整）'};
-+      const obj = { tag: name || j.ps || (j.add+'-'+j.port), server: j.add,
-+                    server_port: _num(j.port,443), uuid: j.id,
-+                    security: j.scy || 'auto' };
-+      if((j.tls||'')==='tls'){
-+        obj.tls = { enabled:true, server_name: j.sni||j.host||j.add, insecure:false };
-+        if(j.alpn) obj.tls.alpn = String(j.alpn).split(',').map(x=>x.trim()).filter(Boolean);
-+      }
-+      const net = (j.net||'').toLowerCase();
-+      if(net==='ws'){ obj.transport = { type:'ws', path: j.path||'/' };
-+        if(j.host) obj.transport.headers = { Host: j.host }; }
-+      else if(net==='grpc'){ obj.transport = { type:'grpc', service_name: j.path||'' }; }
-+      else if(net==='h2'||net==='http'){ obj.transport = { type:'http', path: j.path||'/' };
-+        if(j.host) obj.transport.host = String(j.host).split(','); }
-+      return {proto:'vmess', obj};
-+    }
-+
-+    // ---------- shadowsocks ----------
-+    if(scheme==='ss'){
-+      let s = body.slice(5);
-+      let hostport = '', cred = '';
-+      if(s.includes('@')){
-+        const at = s.lastIndexOf('@');
-+        cred = _b64(s.slice(0,at)) || decodeURIComponent(s.slice(0,at));
-+        hostport = s.slice(at+1);
-+      }else{
-+        const dec = _b64(s);
-+        if(!dec) return {err:'ss 链接解析失败'};
-+        const at = dec.lastIndexOf('@');
-+        cred = dec.slice(0,at); hostport = dec.slice(at+1);
-+      }
-+      const [host, port] = hostport.split(':');
-+      const ci = cred.indexOf(':');
-+      const method = cred.slice(0,ci), password = cred.slice(ci+1);
-+      return {proto:'shadowsocks', obj:{ tag: name || (host+'-'+port), server: host,
-+               server_port: _num(port,8388), method: method, password: password }};
-+    }
-+
-+    // ---------- tuic ----------
-+    if(scheme==='tuic'){
-+      const u = new URL(body);
-+      const q = getQ(u);
-+      const obj = { tag: name || (u.hostname+'-'+u.port), server: u.hostname,
-+                    server_port: _num(u.port,443),
-+                    uuid: decodeURIComponent(u.username||''),
-+                    password: decodeURIComponent(u.password||'') };
-+      obj.tls = { enabled:true, server_name: q.sni||u.hostname,
-+                  insecure: _bool(q.allow_insecure)||_bool(q.insecure) };
-+      if(q.alpn) obj.tls.alpn = q.alpn.split(',').map(x=>x.trim()).filter(Boolean);
-+      if(q.congestion_control) obj.congestion_control = q.congestion_control;
-+      if(q.udp_relay_mode) obj.udp_relay_mode = q.udp_relay_mode;
-+      return {proto:'tuic', obj};
-+    }
-+
-+    // ---------- socks / socks5 / socks4 ----------
-+    if(scheme==='socks5' || scheme==='socks' || scheme==='socks4' || scheme==='socks4a'){
-+      const u = new URL(body.replace(/^(socks5|socks4a|socks4):/i,'socks:')); // 统一成 socks: 让 URL 能解析
-+      const ver = scheme==='socks4' ? '4' : (scheme==='socks4a' ? '4a' : '5');
-+      const obj = { tag: name || (u.hostname+'-'+u.port), server: u.hostname,
-+                    server_port: _num(u.port,1080), version: ver };
-+      if(u.username) obj.username = decodeURIComponent(u.username);
-+      if(u.password) obj.password = decodeURIComponent(u.password);
-+      return {proto:'socks', obj};
-+    }
-+
-+    // ---------- http / https 代理 ----------
-+    if(scheme==='http' || scheme==='https'){
-+      const u = new URL(body);
-+      const obj = { tag: name || (u.hostname+'-'+u.port), server: u.hostname,
-+                    server_port: _num(u.port, scheme==='https'?443:8080) };
-+      if(u.username) obj.username = decodeURIComponent(u.username);
-+      if(u.password) obj.password = decodeURIComponent(u.password);
-+      if(scheme==='https') obj.tls = { enabled:true, server_name: u.hostname };
-+      return {proto:'http', obj};
-+    }
-+
-+    // ---------- anytls ----------
-+    if(scheme==='anytls'){
-+      const u = new URL(body);
-+      const q = getQ(u);
-+      const obj = { tag: name || (u.hostname+'-'+u.port), server: u.hostname,
-+                    server_port: _num(u.port,443),
-+                    password: decodeURIComponent(u.username||'') || (u.password?decodeURIComponent(u.password):'') };
-+      obj.tls = { enabled:true, server_name: q.sni||u.hostname,
-+                  insecure: _bool(q.insecure)||_bool(q.allowinsecure) };
++  // ---------- vless ----------
++  if(scheme==='vless'){
++    if(!host) return {err:'链接里没有服务器地址'};
++    const obj = { tag: name || (host+'-'+port), server: host, server_port: vnum(443), uuid: user };
++    if(q.flow) obj.flow = q.flow;
++    const sec = (q.security||'').toLowerCase();
++    if(sec==='reality'){
++      obj.tls = { enabled:true, server_name: q.sni||q.host||host,
++                  reality:{ enabled:true, public_key: q.pbk||'', short_id: q.sid||'' } };
++      if(q.fp) obj.tls.utls = { enabled:true, fingerprint: q.fp };
++    } else if(sec==='tls' || sec==='xtls'){
++      obj.tls = { enabled:true, server_name: q.sni||q.host||host, insecure: _bool(q.allowinsecure) };
 +      if(q.alpn) obj.tls.alpn = q.alpn.split(',').map(x=>x.trim()).filter(Boolean);
 +      if(q.fp) obj.tls.utls = { enabled:true, fingerprint: q.fp };
-+      return {proto:'anytls', obj};
 +    }
-+  }catch(e){
-+    return {err:'解析失败：' + e.message};
++    const t = (q.type||'').toLowerCase();
++    if(t==='ws'){ obj.transport = { type:'ws', path: q.path||'/' }; if(q.host) obj.transport.headers = { Host:q.host }; }
++    else if(t==='grpc'){ obj.transport = { type:'grpc', service_name: q.servicename||'' }; }
++    else if(t==='http'||t==='h2'){ obj.transport = { type:'http', path: q.path||'/' }; if(q.host) obj.transport.host = q.host.split(','); }
++    else if(t==='httpupgrade'){ obj.transport = { type:'httpupgrade', path: q.path||'/' }; if(q.host) obj.transport.headers = { Host:q.host }; }
++    return {proto:'vless', obj};
 +  }
++
++  // ---------- trojan ----------
++  if(scheme==='trojan'){
++    if(!host) return {err:'链接里没有服务器地址'};
++    const obj = { tag: name || (host+'-'+port), server: host, server_port: vnum(443), password: user };
++    obj.tls = { enabled:true, server_name: q.sni||q.peer||host, insecure: _bool(q.allowinsecure)||_bool(q.insecure) };
++    if(q.alpn) obj.tls.alpn = q.alpn.split(',').map(x=>x.trim()).filter(Boolean);
++    const t = (q.type||'').toLowerCase();
++    if(t==='ws'){ obj.transport = { type:'ws', path: q.path||'/' }; if(q.host) obj.transport.headers = { Host:q.host }; }
++    else if(t==='grpc'){ obj.transport = { type:'grpc', service_name: q.servicename||'' }; }
++    return {proto:'trojan', obj};
++  }
++
++  // ---------- vmess ----------
++  if(scheme==='vmess'){
++    const j = JSON.parse(_b64(raw.slice(raw.indexOf('://')+3)) || '{}');
++    if(!j.add || !j.id) return {err:'vmess 链接解析失败（base64 内容不完整）'};
++    const obj = { tag: name || j.ps || (j.add+'-'+j.port), server: j.add,
++                  server_port: _num(j.port,443), uuid: j.id, security: j.scy || 'auto' };
++    if((j.tls||'')==='tls'){
++      obj.tls = { enabled:true, server_name: j.sni||j.host||j.add, insecure:false };
++      if(j.alpn) obj.tls.alpn = String(j.alpn).split(',').map(x=>x.trim()).filter(Boolean);
++    }
++    const net = (j.net||'').toLowerCase();
++    if(net==='ws'){ obj.transport = { type:'ws', path: j.path||'/' }; if(j.host) obj.transport.headers = { Host:j.host }; }
++    else if(net==='grpc'){ obj.transport = { type:'grpc', service_name: j.path||'' }; }
++    else if(net==='h2'||net==='http'){ obj.transport = { type:'http', path: j.path||'/' }; if(j.host) obj.transport.host = String(j.host).split(','); }
++    return {proto:'vmess', obj};
++  }
++
++  // ---------- shadowsocks ----------
++  if(scheme==='ss'){
++    const body = raw.slice(raw.indexOf('://')+3);
++    let host2='', port2='', cred='';
++    if(body.includes('@')){
++      const at = body.lastIndexOf('@');
++      const left = body.slice(0, at);
++      cred = _b64(left) || decodeURIComponent(left);
++      const hp = body.slice(at+1);
++      const ci = hp.lastIndexOf(':'); host2 = hp.slice(0,ci); port2 = hp.slice(ci+1);
++    } else {
++      const dec = _b64(body); if(!dec) return {err:'ss 链接解析失败'};
++      const at = dec.lastIndexOf('@');
++      cred = dec.slice(0, at);
++      const hp = dec.slice(at+1);
++      const ci = hp.lastIndexOf(':'); host2 = hp.slice(0,ci); port2 = hp.slice(ci+1);
++    }
++    const ci = cred.indexOf(':');
++    return {proto:'shadowsocks', obj:{ tag: name || (host2+'-'+port2), server: host2,
++             server_port: _num(port2,8388), method: cred.slice(0,ci), password: cred.slice(ci+1) }};
++  }
++
++  // ---------- tuic ----------
++  if(scheme==='tuic'){
++    if(!host) return {err:'链接里没有服务器地址'};
++    const obj = { tag: name || (host+'-'+port), server: host, server_port: vnum(443), uuid: user, password: pass };
++    obj.tls = { enabled:true, server_name: q.sni||host, insecure: _bool(q.allow_insecure)||_bool(q.insecure) };
++    if(q.alpn) obj.tls.alpn = q.alpn.split(',').map(x=>x.trim()).filter(Boolean);
++    if(q.congestion_control) obj.congestion_control = q.congestion_control;
++    if(q.udp_relay_mode) obj.udp_relay_mode = q.udp_relay_mode;
++    return {proto:'tuic', obj};
++  }
++
++  // ---------- socks ----------
++  if(scheme==='socks5' || scheme==='socks' || scheme==='socks4' || scheme==='socks4a'){
++    const ver = scheme==='socks4' ? '4' : (scheme==='socks4a' ? '4a' : '5');
++    const obj = { tag: name || (host+'-'+port), server: host, server_port: vnum(1080), version: ver };
++    if(user) obj.username = user;
++    if(pass) obj.password = pass;
++    return {proto:'socks', obj};
++  }
++
++  // ---------- http / https ----------
++  if(scheme==='http' || scheme==='https'){
++    const obj = { tag: name || (host+'-'+port), server: host, server_port: vnum(scheme==='https'?443:8080) };
++    if(user) obj.username = user;
++    if(pass) obj.password = pass;
++    if(scheme==='https') obj.tls = { enabled:true, server_name: host };
++    return {proto:'http', obj};
++  }
++
++  // ---------- anytls ----------
++  if(scheme==='anytls'){
++    const obj = { tag: name || (host+'-'+port), server: host, server_port: vnum(443), password: user || pass };
++    obj.tls = { enabled:true, server_name: q.sni||host, insecure: _bool(q.insecure)||_bool(q.allowinsecure) };
++    if(q.alpn) obj.tls.alpn = q.alpn.split(',').map(x=>x.trim()).filter(Boolean);
++    if(q.fp) obj.tls.utls = { enabled:true, fingerprint: q.fp };
++    return {proto:'anytls', obj};
++  }
++
 +  return {err:'暂不支持 '+scheme+':// 协议'};
 +}
 +
-+function openPaste(){
-+  openNew('outbound');
-+  setTimeout(()=>{ const el = document.getElementById('pasteInput'); if(el) el.focus(); }, 80);
-+}
 +function savePrimary(){
 +  const e = state.editing; if(!e) return;
 +  const el = document.getElementById('pasteInput');
@@ -297,7 +286,7 @@ index 5c58507..2a5a779 100644
  }
  async function openEdit(kind, tag){
    const key = kind==='inbound' ? 'inbounds' : 'outbounds';
-@@ -956,6 +1197,8 @@ async function openEdit(kind, tag){
+@@ -956,6 +1186,8 @@ async function openEdit(kind, tag){
    $('#mTitle').textContent = (kind==='inbound'?'编辑入站 ':'编辑出站 ')+tag;
    $('#mType').innerHTML = typeOptions(kind, proto);
    $('#mNote').textContent = '改 tag 会变成新增（旧 tag 需手动删）。协议类型切换会重置字段。';
@@ -306,7 +295,7 @@ index 5c58507..2a5a779 100644
    resetSeg(); renderForm(); $('#modal').classList.add('on');
  }
  function switchType(proto){
-@@ -1325,13 +1568,24 @@ async function saveObj(){
+@@ -1325,13 +1557,24 @@ async function saveObj(){
      Object.keys(data).forEach(k=>{ if(k===e.proto) delete data[k]; });
    }
    if(!data.tag){ toast('必须填 tag','bad'); return; }
@@ -362,14 +351,14 @@ index aa29b94..bee4b89 100644
      --node)          USE_NODE=1; shift ;;
      --no-singbox)    WITH_SINGBOX=0; shift ;;
 diff --git a/node/panel.html b/node/panel.html
-index 5c58507..2a5a779 100644
+index 5c58507..33ed4bc 100644
 --- a/node/panel.html
 +++ b/node/panel.html
 @@ -87,6 +87,7 @@ code{background:#0c1424;border:1px solid var(--line);border-radius:5px;padding:1
  </style>
  </head>
  <body>
-+<script>window.SBP_BUILD='paste-v6-20261103';</script>
++<script>window.SBP_BUILD='paste-v7-20261103';</script>
  <header>
    <h1>sing-box 控制面板</h1>
    <span class="pill" id="svcPill">状态未知</span>
@@ -412,7 +401,7 @@ index 5c58507..2a5a779 100644
    }
  };
  
-@@ -934,13 +942,246 @@ function userSpec(kind, proto){ return kind === 'inbound' ? (USER_SPEC[proto] ||
+@@ -934,13 +942,235 @@ function userSpec(kind, proto){ return kind === 'inbound' ? (USER_SPEC[proto] ||
  function typeOptions(kind, sel){
    return Object.keys(SCHEMA[kind]).map(p=>`<option value="${p}" ${p===sel?'selected':''}>${SCHEMA[kind][p].icon} ${p}</option>`).join('');
  }
@@ -427,186 +416,175 @@ index 5c58507..2a5a779 100644
 +function _num(v, d){ const n = parseInt(v,10); return isFinite(n) ? n : d; }
 +function _bool(v){ return v==='1' || v==='true' || v===true; }
 +
++function _splitURI(raw){
++  const m = /^([a-zA-Z0-9+.\-]+):\/\/([\s\S]*)$/.exec(raw);
++  if(!m) return null;
++  let scheme = m[1].toLowerCase(), rest = m[2], name = '';
++  const hi = rest.indexOf('#');
++  if(hi >= 0){ try{ name = decodeURIComponent(rest.slice(hi+1)); }catch(e){ name = rest.slice(hi+1); } rest = rest.slice(0, hi); }
++  const q = {};
++  const qi = rest.indexOf('?');
++  if(qi >= 0){
++    for(const [k,v] of new URLSearchParams(rest.slice(qi+1))) q[k.toLowerCase()] = v;
++    rest = rest.slice(0, qi);
++  }
++  rest = rest.replace(/\/+$/,'');
++  let user = '', pass = '', hostpart = rest;
++  const ai = rest.lastIndexOf('@');
++  if(ai >= 0){
++    const ui = rest.slice(0, ai); hostpart = rest.slice(ai+1);
++    const ci = ui.indexOf(':');
++    if(ci >= 0){ user = decodeURIComponent(ui.slice(0,ci)); pass = decodeURIComponent(ui.slice(ci+1)); }
++    else { user = decodeURIComponent(ui); }
++  }
++  let host = hostpart, port = '';
++  const vm = /^\[([^\]]+)\](?::(\d+))?$/.exec(hostpart);
++  if(vm){ host = vm[1]; port = vm[2] || ''; }
++  else {
++    const ci2 = hostpart.lastIndexOf(':');
++    if(ci2 >= 0 && !hostpart.slice(ci2+1).includes(']')){ host = hostpart.slice(0, ci2); port = hostpart.slice(ci2+1); }
++  }
++  return {scheme, user, pass, host, port, q, name};
++}
++
 +function parseShare(raw){
 +  raw = String(raw||'').trim();
 +  if(!raw) return {err:'请粘贴节点链接'};
-+  const mm = raw.match(/^([a-zA-Z0-9]+):\/\/([\s\S]*)$/);
-+  if(!mm) return {err:'不是有效的分享链接（缺少 scheme://）'};
-+  const scheme = mm[1].toLowerCase();
++  const p = _splitURI(raw);
++  if(!p) return {err:'不是有效的分享链接（缺少 scheme://）'};
++  const {scheme, user, pass, host, port, q, name} = p;
++  const tag = name || (host ? host + (port ? '-'+port : '') : scheme);
++  const vnum = (d)=> _num(port, d);
 +
-+  // 拆出 #备注
-+  let body = raw, name = '';
-+  const hi = raw.indexOf('#');
-+  if(hi >= 0){ name = decodeURIComponent(raw.slice(hi+1)) || ''; body = raw.slice(0, hi); }
++  // ---------- hysteria2 / hy2 ----------
++  if(scheme==='hy2' || scheme==='hysteria2'){
++    if(!host) return {err:'链接里没有服务器地址（应为 user:pass@host:port）'};
++    const pw = user + (pass ? ':'+pass : '');
++    const obj = { tag: name || (host+'-'+port), server: host, server_port: vnum(443),
++                  password: pw || q.password || q.auth || '',
++                  tls: { enabled:true, server_name: q.sni || q.peer || host,
++                         insecure: _bool(q.insecure) || _bool(q.allowinsecure), alpn:['h3'] } };
++    if(q.obfs === 'salamander' && (q['obfs-password']||q.obfspassword))
++      obj.obfs = { type:'salamander', password: q['obfs-password']||q.obfspassword };
++    if(q.pinsha256) obj.tls.certificate_public_key_sha256 = [q.pinsha256];
++    return {proto:'hysteria2', obj};
++  }
 +
-+  const getQ = (u)=>{ const q = {}; (u.searchParams||new URLSearchParams()); for(const [k,v] of (u.searchParams||[])) q[k.toLowerCase()] = v; return q; };
-+
-+  try{
-+    // ---------- hysteria2 / hy2 ----------
-+    if(scheme==='hy2' || scheme==='hysteria2'){
-+      const u = new URL(body.replace(/^hy2:/i,'hysteria2:'));
-+      const q = getQ(u);
-+      const pw = decodeURIComponent(u.username||'') + (u.password ? ':'+decodeURIComponent(u.password) : '');
-+      const obj = {
-+        tag: name || (u.hostname + '-' + u.port),
-+        server: u.hostname,
-+        server_port: _num(u.port, 443),
-+        password: pw || q.password || q.auth || '',
-+        tls: { enabled:true, server_name: q.sni || q.peer || u.hostname,
-+               insecure: _bool(q.insecure) || _bool(q.allowinsecure), alpn:['h3'] }
-+      };
-+      if(q.obfs === 'salamander' && (q['obfs-password']||q.obfspassword))
-+        obj.obfs = { type:'salamander', password: q['obfs-password']||q.obfspassword };
-+      if(q.pinSHA256) obj.tls.certificate_public_key_sha256 = [q.pinSHA256];
-+      return {proto:'hysteria2', obj};
-+    }
-+
-+    // ---------- vless ----------
-+    if(scheme==='vless'){
-+      const u = new URL(body);
-+      const q = getQ(u);
-+      const obj = { tag: name || (u.hostname+'-'+u.port), server: u.hostname,
-+                    server_port: _num(u.port,443), uuid: decodeURIComponent(u.username||'') };
-+      if(q.flow) obj.flow = q.flow;
-+      const sec = (q.security||'').toLowerCase();
-+      if(sec==='reality'){
-+        obj.tls = { enabled:true, server_name: q.sni||q.host||u.hostname,
-+                    reality:{ enabled:true, public_key: q.pbk||'', short_id: q.sid||'' } };
-+        if(q.fp) obj.tls.utls = { enabled:true, fingerprint: q.fp };
-+      } else if(sec==='tls' || sec==='xtls'){
-+        obj.tls = { enabled:true, server_name: q.sni||q.host||u.hostname, insecure: _bool(q.allowinsecure) };
-+        if(q.alpn) obj.tls.alpn = q.alpn.split(',').map(x=>x.trim()).filter(Boolean);
-+        if(q.fp) obj.tls.utls = { enabled:true, fingerprint: q.fp };
-+      }
-+      const t = (q.type||'').toLowerCase();
-+      if(t==='ws'){ obj.transport = { type:'ws', path: q.path||'/' };
-+        if(q.host) obj.transport.headers = { Host: q.host }; }
-+      else if(t==='grpc'){ obj.transport = { type:'grpc', service_name: q.servicename||'' }; }
-+      else if(t==='http'||t==='h2'){ obj.transport = { type:'http', path: q.path||'/' };
-+        if(q.host) obj.transport.host = q.host.split(','); }
-+      else if(t==='httpupgrade'){ obj.transport = { type:'httpupgrade', path: q.path||'/' };
-+        if(q.host) obj.transport.headers = { Host: q.host }; }
-+      return {proto:'vless', obj};
-+    }
-+
-+    // ---------- trojan ----------
-+    if(scheme==='trojan'){
-+      const u = new URL(body);
-+      const q = getQ(u);
-+      const obj = { tag: name || (u.hostname+'-'+u.port), server: u.hostname,
-+                    server_port: _num(u.port,443), password: decodeURIComponent(u.username||'') };
-+      obj.tls = { enabled:true, server_name: q.sni||q.peer||u.hostname,
-+                  insecure: _bool(q.allowinsecure)||_bool(q.insecure) };
-+      if(q.alpn) obj.tls.alpn = q.alpn.split(',').map(x=>x.trim()).filter(Boolean);
-+      const t = (q.type||'').toLowerCase();
-+      if(t==='ws'){ obj.transport = { type:'ws', path: q.path||'/' };
-+        if(q.host) obj.transport.headers = { Host: q.host }; }
-+      else if(t==='grpc'){ obj.transport = { type:'grpc', service_name: q.servicename||'' }; }
-+      return {proto:'trojan', obj};
-+    }
-+
-+    // ---------- vmess ----------
-+    if(scheme==='vmess'){
-+      const j = JSON.parse(_b64(body) || '{}');
-+      if(!j.add || !j.id) return {err:'vmess 链接解析失败（base64 内容不完整）'};
-+      const obj = { tag: name || j.ps || (j.add+'-'+j.port), server: j.add,
-+                    server_port: _num(j.port,443), uuid: j.id,
-+                    security: j.scy || 'auto' };
-+      if((j.tls||'')==='tls'){
-+        obj.tls = { enabled:true, server_name: j.sni||j.host||j.add, insecure:false };
-+        if(j.alpn) obj.tls.alpn = String(j.alpn).split(',').map(x=>x.trim()).filter(Boolean);
-+      }
-+      const net = (j.net||'').toLowerCase();
-+      if(net==='ws'){ obj.transport = { type:'ws', path: j.path||'/' };
-+        if(j.host) obj.transport.headers = { Host: j.host }; }
-+      else if(net==='grpc'){ obj.transport = { type:'grpc', service_name: j.path||'' }; }
-+      else if(net==='h2'||net==='http'){ obj.transport = { type:'http', path: j.path||'/' };
-+        if(j.host) obj.transport.host = String(j.host).split(','); }
-+      return {proto:'vmess', obj};
-+    }
-+
-+    // ---------- shadowsocks ----------
-+    if(scheme==='ss'){
-+      let s = body.slice(5);
-+      let hostport = '', cred = '';
-+      if(s.includes('@')){
-+        const at = s.lastIndexOf('@');
-+        cred = _b64(s.slice(0,at)) || decodeURIComponent(s.slice(0,at));
-+        hostport = s.slice(at+1);
-+      }else{
-+        const dec = _b64(s);
-+        if(!dec) return {err:'ss 链接解析失败'};
-+        const at = dec.lastIndexOf('@');
-+        cred = dec.slice(0,at); hostport = dec.slice(at+1);
-+      }
-+      const [host, port] = hostport.split(':');
-+      const ci = cred.indexOf(':');
-+      const method = cred.slice(0,ci), password = cred.slice(ci+1);
-+      return {proto:'shadowsocks', obj:{ tag: name || (host+'-'+port), server: host,
-+               server_port: _num(port,8388), method: method, password: password }};
-+    }
-+
-+    // ---------- tuic ----------
-+    if(scheme==='tuic'){
-+      const u = new URL(body);
-+      const q = getQ(u);
-+      const obj = { tag: name || (u.hostname+'-'+u.port), server: u.hostname,
-+                    server_port: _num(u.port,443),
-+                    uuid: decodeURIComponent(u.username||''),
-+                    password: decodeURIComponent(u.password||'') };
-+      obj.tls = { enabled:true, server_name: q.sni||u.hostname,
-+                  insecure: _bool(q.allow_insecure)||_bool(q.insecure) };
-+      if(q.alpn) obj.tls.alpn = q.alpn.split(',').map(x=>x.trim()).filter(Boolean);
-+      if(q.congestion_control) obj.congestion_control = q.congestion_control;
-+      if(q.udp_relay_mode) obj.udp_relay_mode = q.udp_relay_mode;
-+      return {proto:'tuic', obj};
-+    }
-+
-+    // ---------- socks / socks5 / socks4 ----------
-+    if(scheme==='socks5' || scheme==='socks' || scheme==='socks4' || scheme==='socks4a'){
-+      const u = new URL(body.replace(/^(socks5|socks4a|socks4):/i,'socks:')); // 统一成 socks: 让 URL 能解析
-+      const ver = scheme==='socks4' ? '4' : (scheme==='socks4a' ? '4a' : '5');
-+      const obj = { tag: name || (u.hostname+'-'+u.port), server: u.hostname,
-+                    server_port: _num(u.port,1080), version: ver };
-+      if(u.username) obj.username = decodeURIComponent(u.username);
-+      if(u.password) obj.password = decodeURIComponent(u.password);
-+      return {proto:'socks', obj};
-+    }
-+
-+    // ---------- http / https 代理 ----------
-+    if(scheme==='http' || scheme==='https'){
-+      const u = new URL(body);
-+      const obj = { tag: name || (u.hostname+'-'+u.port), server: u.hostname,
-+                    server_port: _num(u.port, scheme==='https'?443:8080) };
-+      if(u.username) obj.username = decodeURIComponent(u.username);
-+      if(u.password) obj.password = decodeURIComponent(u.password);
-+      if(scheme==='https') obj.tls = { enabled:true, server_name: u.hostname };
-+      return {proto:'http', obj};
-+    }
-+
-+    // ---------- anytls ----------
-+    if(scheme==='anytls'){
-+      const u = new URL(body);
-+      const q = getQ(u);
-+      const obj = { tag: name || (u.hostname+'-'+u.port), server: u.hostname,
-+                    server_port: _num(u.port,443),
-+                    password: decodeURIComponent(u.username||'') || (u.password?decodeURIComponent(u.password):'') };
-+      obj.tls = { enabled:true, server_name: q.sni||u.hostname,
-+                  insecure: _bool(q.insecure)||_bool(q.allowinsecure) };
++  // ---------- vless ----------
++  if(scheme==='vless'){
++    if(!host) return {err:'链接里没有服务器地址'};
++    const obj = { tag: name || (host+'-'+port), server: host, server_port: vnum(443), uuid: user };
++    if(q.flow) obj.flow = q.flow;
++    const sec = (q.security||'').toLowerCase();
++    if(sec==='reality'){
++      obj.tls = { enabled:true, server_name: q.sni||q.host||host,
++                  reality:{ enabled:true, public_key: q.pbk||'', short_id: q.sid||'' } };
++      if(q.fp) obj.tls.utls = { enabled:true, fingerprint: q.fp };
++    } else if(sec==='tls' || sec==='xtls'){
++      obj.tls = { enabled:true, server_name: q.sni||q.host||host, insecure: _bool(q.allowinsecure) };
 +      if(q.alpn) obj.tls.alpn = q.alpn.split(',').map(x=>x.trim()).filter(Boolean);
 +      if(q.fp) obj.tls.utls = { enabled:true, fingerprint: q.fp };
-+      return {proto:'anytls', obj};
 +    }
-+  }catch(e){
-+    return {err:'解析失败：' + e.message};
++    const t = (q.type||'').toLowerCase();
++    if(t==='ws'){ obj.transport = { type:'ws', path: q.path||'/' }; if(q.host) obj.transport.headers = { Host:q.host }; }
++    else if(t==='grpc'){ obj.transport = { type:'grpc', service_name: q.servicename||'' }; }
++    else if(t==='http'||t==='h2'){ obj.transport = { type:'http', path: q.path||'/' }; if(q.host) obj.transport.host = q.host.split(','); }
++    else if(t==='httpupgrade'){ obj.transport = { type:'httpupgrade', path: q.path||'/' }; if(q.host) obj.transport.headers = { Host:q.host }; }
++    return {proto:'vless', obj};
 +  }
++
++  // ---------- trojan ----------
++  if(scheme==='trojan'){
++    if(!host) return {err:'链接里没有服务器地址'};
++    const obj = { tag: name || (host+'-'+port), server: host, server_port: vnum(443), password: user };
++    obj.tls = { enabled:true, server_name: q.sni||q.peer||host, insecure: _bool(q.allowinsecure)||_bool(q.insecure) };
++    if(q.alpn) obj.tls.alpn = q.alpn.split(',').map(x=>x.trim()).filter(Boolean);
++    const t = (q.type||'').toLowerCase();
++    if(t==='ws'){ obj.transport = { type:'ws', path: q.path||'/' }; if(q.host) obj.transport.headers = { Host:q.host }; }
++    else if(t==='grpc'){ obj.transport = { type:'grpc', service_name: q.servicename||'' }; }
++    return {proto:'trojan', obj};
++  }
++
++  // ---------- vmess ----------
++  if(scheme==='vmess'){
++    const j = JSON.parse(_b64(raw.slice(raw.indexOf('://')+3)) || '{}');
++    if(!j.add || !j.id) return {err:'vmess 链接解析失败（base64 内容不完整）'};
++    const obj = { tag: name || j.ps || (j.add+'-'+j.port), server: j.add,
++                  server_port: _num(j.port,443), uuid: j.id, security: j.scy || 'auto' };
++    if((j.tls||'')==='tls'){
++      obj.tls = { enabled:true, server_name: j.sni||j.host||j.add, insecure:false };
++      if(j.alpn) obj.tls.alpn = String(j.alpn).split(',').map(x=>x.trim()).filter(Boolean);
++    }
++    const net = (j.net||'').toLowerCase();
++    if(net==='ws'){ obj.transport = { type:'ws', path: j.path||'/' }; if(j.host) obj.transport.headers = { Host:j.host }; }
++    else if(net==='grpc'){ obj.transport = { type:'grpc', service_name: j.path||'' }; }
++    else if(net==='h2'||net==='http'){ obj.transport = { type:'http', path: j.path||'/' }; if(j.host) obj.transport.host = String(j.host).split(','); }
++    return {proto:'vmess', obj};
++  }
++
++  // ---------- shadowsocks ----------
++  if(scheme==='ss'){
++    const body = raw.slice(raw.indexOf('://')+3);
++    let host2='', port2='', cred='';
++    if(body.includes('@')){
++      const at = body.lastIndexOf('@');
++      const left = body.slice(0, at);
++      cred = _b64(left) || decodeURIComponent(left);
++      const hp = body.slice(at+1);
++      const ci = hp.lastIndexOf(':'); host2 = hp.slice(0,ci); port2 = hp.slice(ci+1);
++    } else {
++      const dec = _b64(body); if(!dec) return {err:'ss 链接解析失败'};
++      const at = dec.lastIndexOf('@');
++      cred = dec.slice(0, at);
++      const hp = dec.slice(at+1);
++      const ci = hp.lastIndexOf(':'); host2 = hp.slice(0,ci); port2 = hp.slice(ci+1);
++    }
++    const ci = cred.indexOf(':');
++    return {proto:'shadowsocks', obj:{ tag: name || (host2+'-'+port2), server: host2,
++             server_port: _num(port2,8388), method: cred.slice(0,ci), password: cred.slice(ci+1) }};
++  }
++
++  // ---------- tuic ----------
++  if(scheme==='tuic'){
++    if(!host) return {err:'链接里没有服务器地址'};
++    const obj = { tag: name || (host+'-'+port), server: host, server_port: vnum(443), uuid: user, password: pass };
++    obj.tls = { enabled:true, server_name: q.sni||host, insecure: _bool(q.allow_insecure)||_bool(q.insecure) };
++    if(q.alpn) obj.tls.alpn = q.alpn.split(',').map(x=>x.trim()).filter(Boolean);
++    if(q.congestion_control) obj.congestion_control = q.congestion_control;
++    if(q.udp_relay_mode) obj.udp_relay_mode = q.udp_relay_mode;
++    return {proto:'tuic', obj};
++  }
++
++  // ---------- socks ----------
++  if(scheme==='socks5' || scheme==='socks' || scheme==='socks4' || scheme==='socks4a'){
++    const ver = scheme==='socks4' ? '4' : (scheme==='socks4a' ? '4a' : '5');
++    const obj = { tag: name || (host+'-'+port), server: host, server_port: vnum(1080), version: ver };
++    if(user) obj.username = user;
++    if(pass) obj.password = pass;
++    return {proto:'socks', obj};
++  }
++
++  // ---------- http / https ----------
++  if(scheme==='http' || scheme==='https'){
++    const obj = { tag: name || (host+'-'+port), server: host, server_port: vnum(scheme==='https'?443:8080) };
++    if(user) obj.username = user;
++    if(pass) obj.password = pass;
++    if(scheme==='https') obj.tls = { enabled:true, server_name: host };
++    return {proto:'http', obj};
++  }
++
++  // ---------- anytls ----------
++  if(scheme==='anytls'){
++    const obj = { tag: name || (host+'-'+port), server: host, server_port: vnum(443), password: user || pass };
++    obj.tls = { enabled:true, server_name: q.sni||host, insecure: _bool(q.insecure)||_bool(q.allowinsecure) };
++    if(q.alpn) obj.tls.alpn = q.alpn.split(',').map(x=>x.trim()).filter(Boolean);
++    if(q.fp) obj.tls.utls = { enabled:true, fingerprint: q.fp };
++    return {proto:'anytls', obj};
++  }
++
 +  return {err:'暂不支持 '+scheme+':// 协议'};
 +}
 +
-+function openPaste(){
-+  openNew('outbound');
-+  setTimeout(()=>{ const el = document.getElementById('pasteInput'); if(el) el.focus(); }, 80);
-+}
 +function savePrimary(){
 +  const e = state.editing; if(!e) return;
 +  const el = document.getElementById('pasteInput');
@@ -660,7 +638,7 @@ index 5c58507..2a5a779 100644
  }
  async function openEdit(kind, tag){
    const key = kind==='inbound' ? 'inbounds' : 'outbounds';
-@@ -956,6 +1197,8 @@ async function openEdit(kind, tag){
+@@ -956,6 +1186,8 @@ async function openEdit(kind, tag){
    $('#mTitle').textContent = (kind==='inbound'?'编辑入站 ':'编辑出站 ')+tag;
    $('#mType').innerHTML = typeOptions(kind, proto);
    $('#mNote').textContent = '改 tag 会变成新增（旧 tag 需手动删）。协议类型切换会重置字段。';
@@ -669,7 +647,7 @@ index 5c58507..2a5a779 100644
    resetSeg(); renderForm(); $('#modal').classList.add('on');
  }
  function switchType(proto){
-@@ -1325,13 +1568,24 @@ async function saveObj(){
+@@ -1325,13 +1557,24 @@ async function saveObj(){
      Object.keys(data).forEach(k=>{ if(k===e.proto) delete data[k]; });
    }
    if(!data.tag){ toast('必须填 tag','bad'); return; }
