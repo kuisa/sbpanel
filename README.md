@@ -48,6 +48,41 @@ sudo ./install.sh
 
 两种方式装完都会打印**面板地址、用户名和密码**。
 
+### 更新到最新版（避开 CDN 缓存）
+
+推完代码立刻重装，经常会发现**面板还是旧界面**。这不是装错了，而是 GitHub raw 有 CDN 缓存
+（普通文件约 5 分钟，`dist/` 下 6~7MB 的二进制更久），`install.sh` 从 raw 拉到的是缓存里的旧文件。
+
+**强制拉最新**（给 URL 加个时间戳绕过缓存）：
+
+```bash
+curl -fsSL "https://raw.githubusercontent.com/kuisa/sbpanel/main/install.sh?t=$(date +%s)" | sudo bash
+```
+
+只想换二进制、不重装面板：
+
+```bash
+# 按架构二选一：amd64 / arm64
+curl -fsSL "https://raw.githubusercontent.com/kuisa/sbpanel/main/dist/sbpanel-linux-arm64?t=$(date +%s)" \
+  -o /usr/local/bin/sbpanel
+chmod +x /usr/local/bin/sbpanel
+systemctl restart sbpanel
+```
+
+**注意：前端 HTML 是 `go:embed` 编进二进制里的**，只替换 `panel.html` 对二进制版没有任何作用，
+必须换整个二进制文件；Node 版才是替换 `/opt/sbpanel-node/panel.html`。
+
+**确认装的是新版**：
+
+```bash
+# 二进制里有没有新功能的关键字（0 = 旧版）
+strings /usr/local/bin/sbpanel | grep -c "解析并保存"
+
+# 或直接看按钮文字：新版是「解析并保存」，旧版是「解析填入」
+```
+
+浏览器记得 **Ctrl+F5** 强刷，否则页面还会走本地缓存。
+
 ### 常用参数
 
 ```bash
