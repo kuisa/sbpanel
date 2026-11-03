@@ -9,6 +9,7 @@
 #   sudo ./install.sh                                   # 默认端口 3222，密码自动生成
 #   sudo ./install.sh --user admin --password 'xxx'      # 指定账号密码
 #   sudo ./install.sh --port 3223
+#   sudo ./install.sh --mirror https://my.host           # 换 sing-box 文件站（也可 export SB_MIRROR=...）
 #   sudo ./install.sh --singbox-url https://.../sb.gz    # 用自己的 sing-box 直链
 #   sudo ./install.sh --no-singbox                       # 不装 sing-box
 #   sudo ./install.sh --force-singbox                    # 已装也覆盖成仓库版本
@@ -35,7 +36,7 @@ ENVF="/etc/sbpanel.env"
 BINDIR="/usr/local/bin"
 SB_BIN="/usr/local/bin/sing-box"
 # 自建文件站（OVH 托管，放裸二进制，不受 GitHub 单文件 25MB 上传限制）
-SB_MIRROR="https://netjett-de.kof95zip.pp.ua"
+SB_MIRROR="${SB_MIRROR:-https://oracle-jp.0o0o.pp.ua}"
 SB_VER="1.12.12"
 NODE_DIR="/opt/sbpanel-node"
 USE_NODE=0
@@ -53,6 +54,7 @@ while [ $# -gt 0 ]; do
     --user)          USER_NAME="$2"; shift 2 ;;
     --config)        CONFIG="$2"; shift 2 ;;
     --service)       SB_SERVICE="$2"; shift 2 ;;
+    --mirror)        SB_MIRROR="${2%/}"; shift 2 ;;
     --singbox-url)   SINGBOX_URL="$2"; shift 2 ;;
     --node)          USE_NODE=1; shift ;;
     --no-singbox)    WITH_SINGBOX=0; shift ;;

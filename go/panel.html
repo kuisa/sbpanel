@@ -133,7 +133,7 @@ code{background:#0c1424;border:1px solid var(--line);border-radius:5px;padding:1
   </section>
 
   <section class="pane" id="pane-out">
-    <div class="row"><button onclick="openNew('outbound')">＋ 新建出站</button><button onclick="loadConfig()">刷新</button></div>
+    <div class="row"><button onclick="openNew('outbound')">＋ 新建出站</button><button onclick="openPaste()">📋 粘贴节点</button><button onclick="loadConfig()">刷新</button></div>
     <div class="list" id="listOut" style="margin-top:10px"></div>
   </section>
 
@@ -166,6 +166,10 @@ code{background:#0c1424;border:1px solid var(--line);border-radius:5px;padding:1
       <label style="white-space:nowrap">协议类型</label>
       <select id="mType" onchange="switchType(this.value)"></select>
     </div>
+  </div>
+  <div class="row" id="pasteWrap" style="margin:10px 0 0;display:none">
+    <input id="pasteInput" placeholder="粘贴分享链接：hy2:// / vless:// / vmess:// / trojan:// / ss:// / tuic://" style="flex:1">
+    <button class="mini" onclick="applyPaste()">解析填入</button>
   </div>
   <div id="mPresets" class="row" style="margin:10px 0 0"></div>
   <div class="seg">
@@ -934,13 +938,185 @@ function userSpec(kind, proto){ return kind === 'inbound' ? (USER_SPEC[proto] ||
 function typeOptions(kind, sel){
   return Object.keys(SCHEMA[kind]).map(p=>`<option value="${p}" ${p===sel?'selected':''}>${SCHEMA[kind][p].icon} ${p}</option>`).join('');
 }
+
+/* ---------------- 分享链接解析（粘贴节点） ---------------- */
+// 支持 hysteria2/hy2、vless、vmess、trojan、shadowsocks/ss、tuic
+function _b64(s){
+  s = s.replace(/-/g,'+').replace(/_/g,'/').trim();
+  while(s.length % 4) s += '=';
+  try{ return decodeURIComponent(escape(atob(s))); }catch(e){ try{ return atob(s); }catch(_){ return ''; } }
+}
+function _num(v, d){ const n = parseInt(v,10); return isFinite(n) ? n : d; }
+function _bool(v){ return v==='1' || v==='true' || v===true; }
+
+function parseShare(raw){
+  raw = String(raw||'').trim();
+  if(!raw) return {err:'请粘贴节点链接'};
+  const mm = raw.match(/^([a-zA-Z0-9]+):\/\/([\s\S]*)$/);
+  if(!mm) return {err:'不是有效的分享链接（缺少 scheme://）'};
+  const scheme = mm[1].toLowerCase();
+
+  // 拆出 #备注
+  let body = raw, name = '';
+  const hi = raw.indexOf('#');
+  if(hi >= 0){ name = decodeURIComponent(raw.slice(hi+1)) || ''; body = raw.slice(0, hi); }
+
+  const getQ = (u)=>{ const q = {}; (u.searchParams||new URLSearchParams()); for(const [k,v] of (u.searchParams||[])) q[k.toLowerCase()] = v; return q; };
+
+  try{
+    // ---------- hysteria2 / hy2 ----------
+    if(scheme==='hy2' || scheme==='hysteria2'){
+      const u = new URL(body.replace(/^hy2:/i,'hysteria2:'));
+      const q = getQ(u);
+      const pw = decodeURIComponent(u.username||'') + (u.password ? ':'+decodeURIComponent(u.password) : '');
+      const obj = {
+        tag: name || (u.hostname + '-' + u.port),
+        server: u.hostname,
+        server_port: _num(u.port, 443),
+        password: pw || q.password || q.auth || '',
+        tls: { enabled:true, server_name: q.sni || q.peer || u.hostname,
+               insecure: _bool(q.insecure) || _bool(q.allowinsecure), alpn:['h3'] }
+      };
+      if(q.obfs === 'salamander' && (q['obfs-password']||q.obfspassword))
+        obj.obfs = { type:'salamander', password: q['obfs-password']||q.obfspassword };
+      if(q.pinSHA256) obj.tls.certificate_public_key_sha256 = [q.pinSHA256];
+      return {proto:'hysteria2', obj};
+    }
+
+    // ---------- vless ----------
+    if(scheme==='vless'){
+      const u = new URL(body);
+      const q = getQ(u);
+      const obj = { tag: name || (u.hostname+'-'+u.port), server: u.hostname,
+                    server_port: _num(u.port,443), uuid: decodeURIComponent(u.username||'') };
+      if(q.flow) obj.flow = q.flow;
+      const sec = (q.security||'').toLowerCase();
+      if(sec==='reality'){
+        obj.tls = { enabled:true, server_name: q.sni||q.host||u.hostname,
+                    reality:{ enabled:true, public_key: q.pbk||'', short_id: q.sid||'' } };
+        if(q.fp) obj.tls.utls = { enabled:true, fingerprint: q.fp };
+      } else if(sec==='tls' || sec==='xtls'){
+        obj.tls = { enabled:true, server_name: q.sni||q.host||u.hostname, insecure: _bool(q.allowinsecure) };
+        if(q.alpn) obj.tls.alpn = q.alpn.split(',').map(x=>x.trim()).filter(Boolean);
+        if(q.fp) obj.tls.utls = { enabled:true, fingerprint: q.fp };
+      }
+      const t = (q.type||'').toLowerCase();
+      if(t==='ws'){ obj.transport = { type:'ws', path: q.path||'/' };
+        if(q.host) obj.transport.headers = { Host: q.host }; }
+      else if(t==='grpc'){ obj.transport = { type:'grpc', service_name: q.servicename||'' }; }
+      else if(t==='http'||t==='h2'){ obj.transport = { type:'http', path: q.path||'/' };
+        if(q.host) obj.transport.host = q.host.split(','); }
+      else if(t==='httpupgrade'){ obj.transport = { type:'httpupgrade', path: q.path||'/' };
+        if(q.host) obj.transport.headers = { Host: q.host }; }
+      return {proto:'vless', obj};
+    }
+
+    // ---------- trojan ----------
+    if(scheme==='trojan'){
+      const u = new URL(body);
+      const q = getQ(u);
+      const obj = { tag: name || (u.hostname+'-'+u.port), server: u.hostname,
+                    server_port: _num(u.port,443), password: decodeURIComponent(u.username||'') };
+      obj.tls = { enabled:true, server_name: q.sni||q.peer||u.hostname,
+                  insecure: _bool(q.allowinsecure)||_bool(q.insecure) };
+      if(q.alpn) obj.tls.alpn = q.alpn.split(',').map(x=>x.trim()).filter(Boolean);
+      const t = (q.type||'').toLowerCase();
+      if(t==='ws'){ obj.transport = { type:'ws', path: q.path||'/' };
+        if(q.host) obj.transport.headers = { Host: q.host }; }
+      else if(t==='grpc'){ obj.transport = { type:'grpc', service_name: q.servicename||'' }; }
+      return {proto:'trojan', obj};
+    }
+
+    // ---------- vmess ----------
+    if(scheme==='vmess'){
+      const j = JSON.parse(_b64(body) || '{}');
+      if(!j.add || !j.id) return {err:'vmess 链接解析失败（base64 内容不完整）'};
+      const obj = { tag: name || j.ps || (j.add+'-'+j.port), server: j.add,
+                    server_port: _num(j.port,443), uuid: j.id,
+                    security: j.scy || 'auto' };
+      if((j.tls||'')==='tls'){
+        obj.tls = { enabled:true, server_name: j.sni||j.host||j.add, insecure:false };
+        if(j.alpn) obj.tls.alpn = String(j.alpn).split(',').map(x=>x.trim()).filter(Boolean);
+      }
+      const net = (j.net||'').toLowerCase();
+      if(net==='ws'){ obj.transport = { type:'ws', path: j.path||'/' };
+        if(j.host) obj.transport.headers = { Host: j.host }; }
+      else if(net==='grpc'){ obj.transport = { type:'grpc', service_name: j.path||'' }; }
+      else if(net==='h2'||net==='http'){ obj.transport = { type:'http', path: j.path||'/' };
+        if(j.host) obj.transport.host = String(j.host).split(','); }
+      return {proto:'vmess', obj};
+    }
+
+    // ---------- shadowsocks ----------
+    if(scheme==='ss'){
+      let s = body.slice(5);
+      let hostport = '', cred = '';
+      if(s.includes('@')){
+        const at = s.lastIndexOf('@');
+        cred = _b64(s.slice(0,at)) || decodeURIComponent(s.slice(0,at));
+        hostport = s.slice(at+1);
+      }else{
+        const dec = _b64(s);
+        if(!dec) return {err:'ss 链接解析失败'};
+        const at = dec.lastIndexOf('@');
+        cred = dec.slice(0,at); hostport = dec.slice(at+1);
+      }
+      const [host, port] = hostport.split(':');
+      const ci = cred.indexOf(':');
+      const method = cred.slice(0,ci), password = cred.slice(ci+1);
+      return {proto:'shadowsocks', obj:{ tag: name || (host+'-'+port), server: host,
+               server_port: _num(port,8388), method: method, password: password }};
+    }
+
+    // ---------- tuic ----------
+    if(scheme==='tuic'){
+      const u = new URL(body);
+      const q = getQ(u);
+      const obj = { tag: name || (u.hostname+'-'+u.port), server: u.hostname,
+                    server_port: _num(u.port,443),
+                    uuid: decodeURIComponent(u.username||''),
+                    password: decodeURIComponent(u.password||'') };
+      obj.tls = { enabled:true, server_name: q.sni||u.hostname,
+                  insecure: _bool(q.allow_insecure)||_bool(q.insecure) };
+      if(q.alpn) obj.tls.alpn = q.alpn.split(',').map(x=>x.trim()).filter(Boolean);
+      if(q.congestion_control) obj.congestion_control = q.congestion_control;
+      if(q.udp_relay_mode) obj.udp_relay_mode = q.udp_relay_mode;
+      return {proto:'tuic', obj};
+    }
+  }catch(e){
+    return {err:'解析失败：' + e.message};
+  }
+  return {err:'暂不支持 '+scheme+':// 协议'};
+}
+
+function openPaste(){
+  openNew('outbound');
+  setTimeout(()=>{ const el = document.getElementById('pasteInput'); if(el) el.focus(); }, 80);
+}
+function applyPaste(){
+  const el = document.getElementById('pasteInput');
+  const r = parseShare(el ? el.value : '');
+  if(r.err){ toast(r.err,'bad'); return; }
+  const e = state.editing; if(!e || e.kind!=='outbound') return;
+  e.proto = r.proto;
+  e.obj = r.obj;
+  $('#mType').innerHTML = typeOptions('outbound', r.proto);
+  $('#mType').value = r.proto;
+  setSeg('form');
+  renderForm();
+  toast('已解析为 '+r.proto+'：'+r.obj.tag,'ok');
+}
+
 function openNew(kind, proto){
   proto = proto || Object.keys(SCHEMA[kind])[0];
   state.editing = { kind, tag:null, proto, obj:{} };
   $('#mTitle').textContent = kind==='inbound' ? '新建入站' : '新建出站';
   $('#mType').innerHTML = typeOptions(kind, proto);
   $('#mNote').textContent = '保存后记得点「配置检查」或直接热重载；坏配置会被 sing-box 拒绝并提示原因。';
-  $('#mJson').value = ''; setSeg('form'); renderForm(); $('#modal').classList.add('on');
+  $('#mJson').value = '';
+  const pw = document.getElementById('pasteWrap'); if(pw) pw.style.display = (kind==='outbound') ? 'flex' : 'none';
+  const pi = document.getElementById('pasteInput'); if(pi) pi.value = '';
+  setSeg('form'); renderForm(); $('#modal').classList.add('on');
 }
 async function openEdit(kind, tag){
   const key = kind==='inbound' ? 'inbounds' : 'outbounds';
@@ -956,6 +1132,7 @@ async function openEdit(kind, tag){
   $('#mTitle').textContent = (kind==='inbound'?'编辑入站 ':'编辑出站 ')+tag;
   $('#mType').innerHTML = typeOptions(kind, proto);
   $('#mNote').textContent = '改 tag 会变成新增（旧 tag 需手动删）。协议类型切换会重置字段。';
+  const pw2 = document.getElementById('pasteWrap'); if(pw2) pw2.style.display = 'none';
   resetSeg(); renderForm(); $('#modal').classList.add('on');
 }
 function switchType(proto){
