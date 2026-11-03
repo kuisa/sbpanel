@@ -169,7 +169,7 @@ code{background:#0c1424;border:1px solid var(--line);border-radius:5px;padding:1
   </div>
   <div class="row" id="pasteWrap" style="margin:10px 0 0;display:none">
     <input id="pasteInput" placeholder="粘贴分享链接：hy2:// / vless:// / vmess:// / trojan:// / ss:// / tuic://" style="flex:1">
-    <button class="mini" onclick="applyPaste()">解析填入</button>
+    <button class="mini" onclick="applyPaste()">解析并保存</button>
   </div>
   <div id="mPresets" class="row" style="margin:10px 0 0"></div>
   <div class="seg">
@@ -905,6 +905,9 @@ const SCHEMA = {
                   F('heartbeat','心跳间隔','text',{ph:'10s',g:G_PARAM,d:'保活用，10s 左右'}),
                   F('udp_over_stream','UDP 走流式传输','bool',{g:G_PARAM,d:'部分服务端要求开'}),
                   ...['tls.enabled','tls.server_name','tls.insecure','tls.alpn'].map(k=>TLS_OUT.find(f=>f.k===k))]},
+    anytls:     {icon:'🔐', fields:[...SRV,
+                  F('password','密码','pass',{g:G_BASE,d:'和另一端一致'}),
+                  ...['tls.enabled','tls.server_name','tls.insecure','tls.alpn','tls.utls.enabled','tls.utls.fingerprint'].map(k=>TLS_OUT.find(f=>f.k===k))]},
   }
 };
 
@@ -1083,6 +1086,42 @@ function parseShare(raw){
       if(q.udp_relay_mode) obj.udp_relay_mode = q.udp_relay_mode;
       return {proto:'tuic', obj};
     }
+
+    // ---------- socks / socks5 / socks4 ----------
+    if(scheme==='socks5' || scheme==='socks' || scheme==='socks4' || scheme==='socks4a'){
+      const u = new URL(body.replace(/^(socks5|socks4a|socks4):/i,'socks:')); // 统一成 socks: 让 URL 能解析
+      const ver = scheme==='socks4' ? '4' : (scheme==='socks4a' ? '4a' : '5');
+      const obj = { tag: name || (u.hostname+'-'+u.port), server: u.hostname,
+                    server_port: _num(u.port,1080), version: ver };
+      if(u.username) obj.username = decodeURIComponent(u.username);
+      if(u.password) obj.password = decodeURIComponent(u.password);
+      return {proto:'socks', obj};
+    }
+
+    // ---------- http / https 代理 ----------
+    if(scheme==='http' || scheme==='https'){
+      const u = new URL(body);
+      const obj = { tag: name || (u.hostname+'-'+u.port), server: u.hostname,
+                    server_port: _num(u.port, scheme==='https'?443:8080) };
+      if(u.username) obj.username = decodeURIComponent(u.username);
+      if(u.password) obj.password = decodeURIComponent(u.password);
+      if(scheme==='https') obj.tls = { enabled:true, server_name: u.hostname };
+      return {proto:'http', obj};
+    }
+
+    // ---------- anytls ----------
+    if(scheme==='anytls'){
+      const u = new URL(body);
+      const q = getQ(u);
+      const obj = { tag: name || (u.hostname+'-'+u.port), server: u.hostname,
+                    server_port: _num(u.port,443),
+                    password: decodeURIComponent(u.username||'') || (u.password?decodeURIComponent(u.password):'') };
+      obj.tls = { enabled:true, server_name: q.sni||u.hostname,
+                  insecure: _bool(q.insecure)||_bool(q.allowinsecure) };
+      if(q.alpn) obj.tls.alpn = q.alpn.split(',').map(x=>x.trim()).filter(Boolean);
+      if(q.fp) obj.tls.utls = { enabled:true, fingerprint: q.fp };
+      return {proto:'anytls', obj};
+    }
   }catch(e){
     return {err:'解析失败：' + e.message};
   }
@@ -1104,7 +1143,9 @@ function applyPaste(){
   $('#mType').value = r.proto;
   setSeg('form');
   renderForm();
-  toast('已解析为 '+r.proto+'：'+r.obj.tag,'ok');
+  toast('已解析为 '+r.proto+'：'+r.obj.tag+'，正在写入配置…','ok');
+  const pi = document.getElementById('pasteInput'); if(pi) pi.value = '';
+  setTimeout(()=>{ saveObj(); }, 80);   // 解析后直接保存，写入 config.json
 }
 
 function openNew(kind, proto){

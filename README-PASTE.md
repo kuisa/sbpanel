@@ -27,3 +27,9 @@ systemctl restart sbpanel
 - 新增 `--mirror <url>` 参数，也可用环境变量覆盖：`SB_MIRROR=https://... ./install.sh`
 - 文件站路径约定不变：`$SB_MIRROR/samd64b`、`$SB_MIRROR/sarm64b`（裸二进制）
 - 已实测新站两文件 sha256 与官方 1.12.12 一致
+
+## 2026-11-03 第二版（链式节点）
+- 粘贴后**自动保存**（解析 → 直接写入 config.json，不再需要点保存）；按钮改名「解析并保存」
+- 新增协议解析：socks5 / socks / socks4 / socks4a / http / https / anytls
+- 链式出站的 hy2 / tuic / vless / vmess / trojan 走同一套解析
+- 实测：hy2、tuic 粘贴后 config.json 结构正确，保存返回 ok

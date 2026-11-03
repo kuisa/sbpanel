@@ -1,5 +1,5 @@
 diff --git a/go/panel.html b/go/panel.html
-index 5c58507..193ea03 100644
+index 5c58507..0e09867 100644
 --- a/go/panel.html
 +++ b/go/panel.html
 @@ -133,7 +133,7 @@ code{background:#0c1424;border:1px solid var(--line);border-radius:5px;padding:1
@@ -17,12 +17,22 @@ index 5c58507..193ea03 100644
    </div>
 +  <div class="row" id="pasteWrap" style="margin:10px 0 0;display:none">
 +    <input id="pasteInput" placeholder="粘贴分享链接：hy2:// / vless:// / vmess:// / trojan:// / ss:// / tuic://" style="flex:1">
-+    <button class="mini" onclick="applyPaste()">解析填入</button>
++    <button class="mini" onclick="applyPaste()">解析并保存</button>
 +  </div>
    <div id="mPresets" class="row" style="margin:10px 0 0"></div>
    <div class="seg">
      <button class="on" id="segForm" onclick="setSeg('form')">表单</button>
-@@ -934,13 +938,185 @@ function userSpec(kind, proto){ return kind === 'inbound' ? (USER_SPEC[proto] ||
+@@ -901,6 +905,9 @@ const SCHEMA = {
+                   F('heartbeat','心跳间隔','text',{ph:'10s',g:G_PARAM,d:'保活用，10s 左右'}),
+                   F('udp_over_stream','UDP 走流式传输','bool',{g:G_PARAM,d:'部分服务端要求开'}),
+                   ...['tls.enabled','tls.server_name','tls.insecure','tls.alpn'].map(k=>TLS_OUT.find(f=>f.k===k))]},
++    anytls:     {icon:'🔐', fields:[...SRV,
++                  F('password','密码','pass',{g:G_BASE,d:'和另一端一致'}),
++                  ...['tls.enabled','tls.server_name','tls.insecure','tls.alpn','tls.utls.enabled','tls.utls.fingerprint'].map(k=>TLS_OUT.find(f=>f.k===k))]},
+   }
+ };
+ 
+@@ -934,13 +941,223 @@ function userSpec(kind, proto){ return kind === 'inbound' ? (USER_SPEC[proto] ||
  function typeOptions(kind, sel){
    return Object.keys(SCHEMA[kind]).map(p=>`<option value="${p}" ${p===sel?'selected':''}>${SCHEMA[kind][p].icon} ${p}</option>`).join('');
  }
@@ -171,6 +181,42 @@ index 5c58507..193ea03 100644
 +      if(q.udp_relay_mode) obj.udp_relay_mode = q.udp_relay_mode;
 +      return {proto:'tuic', obj};
 +    }
++
++    // ---------- socks / socks5 / socks4 ----------
++    if(scheme==='socks5' || scheme==='socks' || scheme==='socks4' || scheme==='socks4a'){
++      const u = new URL(body.replace(/^(socks5|socks4a|socks4):/i,'socks:')); // 统一成 socks: 让 URL 能解析
++      const ver = scheme==='socks4' ? '4' : (scheme==='socks4a' ? '4a' : '5');
++      const obj = { tag: name || (u.hostname+'-'+u.port), server: u.hostname,
++                    server_port: _num(u.port,1080), version: ver };
++      if(u.username) obj.username = decodeURIComponent(u.username);
++      if(u.password) obj.password = decodeURIComponent(u.password);
++      return {proto:'socks', obj};
++    }
++
++    // ---------- http / https 代理 ----------
++    if(scheme==='http' || scheme==='https'){
++      const u = new URL(body);
++      const obj = { tag: name || (u.hostname+'-'+u.port), server: u.hostname,
++                    server_port: _num(u.port, scheme==='https'?443:8080) };
++      if(u.username) obj.username = decodeURIComponent(u.username);
++      if(u.password) obj.password = decodeURIComponent(u.password);
++      if(scheme==='https') obj.tls = { enabled:true, server_name: u.hostname };
++      return {proto:'http', obj};
++    }
++
++    // ---------- anytls ----------
++    if(scheme==='anytls'){
++      const u = new URL(body);
++      const q = getQ(u);
++      const obj = { tag: name || (u.hostname+'-'+u.port), server: u.hostname,
++                    server_port: _num(u.port,443),
++                    password: decodeURIComponent(u.username||'') || (u.password?decodeURIComponent(u.password):'') };
++      obj.tls = { enabled:true, server_name: q.sni||u.hostname,
++                  insecure: _bool(q.insecure)||_bool(q.allowinsecure) };
++      if(q.alpn) obj.tls.alpn = q.alpn.split(',').map(x=>x.trim()).filter(Boolean);
++      if(q.fp) obj.tls.utls = { enabled:true, fingerprint: q.fp };
++      return {proto:'anytls', obj};
++    }
 +  }catch(e){
 +    return {err:'解析失败：' + e.message};
 +  }
@@ -192,7 +238,9 @@ index 5c58507..193ea03 100644
 +  $('#mType').value = r.proto;
 +  setSeg('form');
 +  renderForm();
-+  toast('已解析为 '+r.proto+'：'+r.obj.tag,'ok');
++  toast('已解析为 '+r.proto+'：'+r.obj.tag+'，正在写入配置…','ok');
++  const pi = document.getElementById('pasteInput'); if(pi) pi.value = '';
++  setTimeout(()=>{ saveObj(); }, 80);   // 解析后直接保存，写入 config.json
 +}
 +
  function openNew(kind, proto){
@@ -209,7 +257,7 @@ index 5c58507..193ea03 100644
  }
  async function openEdit(kind, tag){
    const key = kind==='inbound' ? 'inbounds' : 'outbounds';
-@@ -956,6 +1132,7 @@ async function openEdit(kind, tag){
+@@ -956,6 +1173,7 @@ async function openEdit(kind, tag){
    $('#mTitle').textContent = (kind==='inbound'?'编辑入站 ':'编辑出站 ')+tag;
    $('#mType').innerHTML = typeOptions(kind, proto);
    $('#mNote').textContent = '改 tag 会变成新增（旧 tag 需手动删）。协议类型切换会重置字段。';
@@ -217,8 +265,37 @@ index 5c58507..193ea03 100644
    resetSeg(); renderForm(); $('#modal').classList.add('on');
  }
  function switchType(proto){
+diff --git a/install.sh b/install.sh
+index aa29b94..bee4b89 100644
+--- a/install.sh
++++ b/install.sh
+@@ -9,6 +9,7 @@
+ #   sudo ./install.sh                                   # 默认端口 3222，密码自动生成
+ #   sudo ./install.sh --user admin --password 'xxx'      # 指定账号密码
+ #   sudo ./install.sh --port 3223
++#   sudo ./install.sh --mirror https://my.host           # 换 sing-box 文件站（也可 export SB_MIRROR=...）
+ #   sudo ./install.sh --singbox-url https://.../sb.gz    # 用自己的 sing-box 直链
+ #   sudo ./install.sh --no-singbox                       # 不装 sing-box
+ #   sudo ./install.sh --force-singbox                    # 已装也覆盖成仓库版本
+@@ -35,7 +36,7 @@ ENVF="/etc/sbpanel.env"
+ BINDIR="/usr/local/bin"
+ SB_BIN="/usr/local/bin/sing-box"
+ # 自建文件站（OVH 托管，放裸二进制，不受 GitHub 单文件 25MB 上传限制）
+-SB_MIRROR="https://netjett-de.kof95zip.pp.ua"
++SB_MIRROR="${SB_MIRROR:-https://oracle-jp.0o0o.pp.ua}"
+ SB_VER="1.12.12"
+ NODE_DIR="/opt/sbpanel-node"
+ USE_NODE=0
+@@ -53,6 +54,7 @@ while [ $# -gt 0 ]; do
+     --user)          USER_NAME="$2"; shift 2 ;;
+     --config)        CONFIG="$2"; shift 2 ;;
+     --service)       SB_SERVICE="$2"; shift 2 ;;
++    --mirror)        SB_MIRROR="${2%/}"; shift 2 ;;
+     --singbox-url)   SINGBOX_URL="$2"; shift 2 ;;
+     --node)          USE_NODE=1; shift ;;
+     --no-singbox)    WITH_SINGBOX=0; shift ;;
 diff --git a/node/panel.html b/node/panel.html
-index 5c58507..193ea03 100644
+index 5c58507..0e09867 100644
 --- a/node/panel.html
 +++ b/node/panel.html
 @@ -133,7 +133,7 @@ code{background:#0c1424;border:1px solid var(--line);border-radius:5px;padding:1
@@ -236,12 +313,22 @@ index 5c58507..193ea03 100644
    </div>
 +  <div class="row" id="pasteWrap" style="margin:10px 0 0;display:none">
 +    <input id="pasteInput" placeholder="粘贴分享链接：hy2:// / vless:// / vmess:// / trojan:// / ss:// / tuic://" style="flex:1">
-+    <button class="mini" onclick="applyPaste()">解析填入</button>
++    <button class="mini" onclick="applyPaste()">解析并保存</button>
 +  </div>
    <div id="mPresets" class="row" style="margin:10px 0 0"></div>
    <div class="seg">
      <button class="on" id="segForm" onclick="setSeg('form')">表单</button>
-@@ -934,13 +938,185 @@ function userSpec(kind, proto){ return kind === 'inbound' ? (USER_SPEC[proto] ||
+@@ -901,6 +905,9 @@ const SCHEMA = {
+                   F('heartbeat','心跳间隔','text',{ph:'10s',g:G_PARAM,d:'保活用，10s 左右'}),
+                   F('udp_over_stream','UDP 走流式传输','bool',{g:G_PARAM,d:'部分服务端要求开'}),
+                   ...['tls.enabled','tls.server_name','tls.insecure','tls.alpn'].map(k=>TLS_OUT.find(f=>f.k===k))]},
++    anytls:     {icon:'🔐', fields:[...SRV,
++                  F('password','密码','pass',{g:G_BASE,d:'和另一端一致'}),
++                  ...['tls.enabled','tls.server_name','tls.insecure','tls.alpn','tls.utls.enabled','tls.utls.fingerprint'].map(k=>TLS_OUT.find(f=>f.k===k))]},
+   }
+ };
+ 
+@@ -934,13 +941,223 @@ function userSpec(kind, proto){ return kind === 'inbound' ? (USER_SPEC[proto] ||
  function typeOptions(kind, sel){
    return Object.keys(SCHEMA[kind]).map(p=>`<option value="${p}" ${p===sel?'selected':''}>${SCHEMA[kind][p].icon} ${p}</option>`).join('');
  }
@@ -390,6 +477,42 @@ index 5c58507..193ea03 100644
 +      if(q.udp_relay_mode) obj.udp_relay_mode = q.udp_relay_mode;
 +      return {proto:'tuic', obj};
 +    }
++
++    // ---------- socks / socks5 / socks4 ----------
++    if(scheme==='socks5' || scheme==='socks' || scheme==='socks4' || scheme==='socks4a'){
++      const u = new URL(body.replace(/^(socks5|socks4a|socks4):/i,'socks:')); // 统一成 socks: 让 URL 能解析
++      const ver = scheme==='socks4' ? '4' : (scheme==='socks4a' ? '4a' : '5');
++      const obj = { tag: name || (u.hostname+'-'+u.port), server: u.hostname,
++                    server_port: _num(u.port,1080), version: ver };
++      if(u.username) obj.username = decodeURIComponent(u.username);
++      if(u.password) obj.password = decodeURIComponent(u.password);
++      return {proto:'socks', obj};
++    }
++
++    // ---------- http / https 代理 ----------
++    if(scheme==='http' || scheme==='https'){
++      const u = new URL(body);
++      const obj = { tag: name || (u.hostname+'-'+u.port), server: u.hostname,
++                    server_port: _num(u.port, scheme==='https'?443:8080) };
++      if(u.username) obj.username = decodeURIComponent(u.username);
++      if(u.password) obj.password = decodeURIComponent(u.password);
++      if(scheme==='https') obj.tls = { enabled:true, server_name: u.hostname };
++      return {proto:'http', obj};
++    }
++
++    // ---------- anytls ----------
++    if(scheme==='anytls'){
++      const u = new URL(body);
++      const q = getQ(u);
++      const obj = { tag: name || (u.hostname+'-'+u.port), server: u.hostname,
++                    server_port: _num(u.port,443),
++                    password: decodeURIComponent(u.username||'') || (u.password?decodeURIComponent(u.password):'') };
++      obj.tls = { enabled:true, server_name: q.sni||u.hostname,
++                  insecure: _bool(q.insecure)||_bool(q.allowinsecure) };
++      if(q.alpn) obj.tls.alpn = q.alpn.split(',').map(x=>x.trim()).filter(Boolean);
++      if(q.fp) obj.tls.utls = { enabled:true, fingerprint: q.fp };
++      return {proto:'anytls', obj};
++    }
 +  }catch(e){
 +    return {err:'解析失败：' + e.message};
 +  }
@@ -411,7 +534,9 @@ index 5c58507..193ea03 100644
 +  $('#mType').value = r.proto;
 +  setSeg('form');
 +  renderForm();
-+  toast('已解析为 '+r.proto+'：'+r.obj.tag,'ok');
++  toast('已解析为 '+r.proto+'：'+r.obj.tag+'，正在写入配置…','ok');
++  const pi = document.getElementById('pasteInput'); if(pi) pi.value = '';
++  setTimeout(()=>{ saveObj(); }, 80);   // 解析后直接保存，写入 config.json
 +}
 +
  function openNew(kind, proto){
@@ -428,7 +553,7 @@ index 5c58507..193ea03 100644
  }
  async function openEdit(kind, tag){
    const key = kind==='inbound' ? 'inbounds' : 'outbounds';
-@@ -956,6 +1132,7 @@ async function openEdit(kind, tag){
+@@ -956,6 +1173,7 @@ async function openEdit(kind, tag){
    $('#mTitle').textContent = (kind==='inbound'?'编辑入站 ':'编辑出站 ')+tag;
    $('#mType').innerHTML = typeOptions(kind, proto);
    $('#mNote').textContent = '改 tag 会变成新增（旧 tag 需手动删）。协议类型切换会重置字段。';
