@@ -49,3 +49,7 @@ systemctl restart sbpanel
 - 修复 v7 重写解析器时误删 `openPaste()` 导致的 `ReferenceError: openPaste is not defined`
 - 已做全量 onclick 依赖检查，确认 45 个按钮回调都有定义
 - 真机（编译版）点击流程验证：粘贴 183 字链接 → 解析并保存 → config.json 正确
+
+## v9（2026-11-03）
+- TUIC 允许空密码：`tuic://uuid:@host:port` 这种链接不再被「缺少 password」拦住
+- 实测该 TUIC 节点：保存后 config.json 结构正确，sing-box check 通过，出口 119.9.127.23（香港）

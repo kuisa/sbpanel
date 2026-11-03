@@ -87,7 +87,7 @@ code{background:#0c1424;border:1px solid var(--line);border-radius:5px;padding:1
 </style>
 </head>
 <body>
-<script>window.SBP_BUILD='paste-v8-20261103';</script>
+<script>window.SBP_BUILD='paste-v9-20261103';</script>
 <header>
   <h1>sing-box 控制面板</h1>
   <span class="pill" id="svcPill">状态未知</span>
@@ -1145,7 +1145,7 @@ function applyPaste(){
   // 必填校验：缺关键字段说明链接不完整，直接拒绝，别存半截节点
   const NEED = { socks:['server','server_port'], http:['server','server_port'],
                  hysteria2:['server','server_port','password'],
-                 tuic:['server','server_port','uuid','password'],
+                 tuic:['server','server_port','uuid'],   // tuic 允许空密码（uuid:@host）
                  anytls:['server','server_port','password'],
                  vless:['server','server_port','uuid'], vmess:['server','server_port','uuid'],
                  trojan:['server','server_port','password'],
