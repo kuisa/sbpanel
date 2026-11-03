@@ -87,7 +87,7 @@ code{background:#0c1424;border:1px solid var(--line);border-radius:5px;padding:1
 </style>
 </head>
 <body>
-<script>window.SBP_BUILD='paste-v7-20261103';</script>
+<script>window.SBP_BUILD='paste-v8-20261103';</script>
 <header>
   <h1>sing-box 控制面板</h1>
   <span class="pill" id="svcPill">状态未知</span>
@@ -1120,6 +1120,11 @@ function parseShare(raw){
   }
 
   return {err:'暂不支持 '+scheme+':// 协议'};
+}
+
+function openPaste(){
+  openNew('outbound');
+  setTimeout(()=>{ const el = document.getElementById('pasteInput'); if(el) el.focus(); }, 80);
 }
 
 function savePrimary(){

@@ -44,3 +44,8 @@ systemctl restart sbpanel
 原因：部分浏览器对 `hysteria2://user:pass@host:port` 这种自定义协议解析会返回空 host，
 导致 server/password 丢失成空壳。现在手工切分 scheme / userinfo / host / port / query / fragment。
 所有协议（hy2、vless、vmess、trojan、ss、tuic、socks、http、anytls）均已验证。
+
+## v8（2026-11-03 修正）
+- 修复 v7 重写解析器时误删 `openPaste()` 导致的 `ReferenceError: openPaste is not defined`
+- 已做全量 onclick 依赖检查，确认 45 个按钮回调都有定义
+- 真机（编译版）点击流程验证：粘贴 183 字链接 → 解析并保存 → config.json 正确
