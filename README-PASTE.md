@@ -32,4 +32,9 @@ systemctl restart sbpanel
 - 粘贴后**自动保存**（解析 → 直接写入 config.json，不再需要点保存）；按钮改名「解析并保存」
 - 新增协议解析：socks5 / socks / socks4 / socks4a / http / https / anytls
 - 链式出站的 hy2 / tuic / vless / vmess / trojan 走同一套解析
-- 实测：hy2、tuic 粘贴后 config.json 结构正确，保存返回 ok
+- 实测：hy2、tuic、socks5 粘贴后 config.json 结构正确
+- 保存前校验：代理类出站缺 server/port 会被拦截，不再写出 {"type":"direct","tag":"xx"} 的空壳
+
+## 版本确认（重要）
+替换后在浏览器控制台执行：`SBP_BUILD`
+应输出 `paste-v3-20261103`。若输出 undefined，说明加载的还是旧文件（缓存或没替换成功）。

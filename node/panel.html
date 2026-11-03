@@ -87,6 +87,7 @@ code{background:#0c1424;border:1px solid var(--line);border-radius:5px;padding:1
 </style>
 </head>
 <body>
+<script>window.SBP_BUILD='paste-v6-20261103';</script>
 <header>
   <h1>sing-box 控制面板</h1>
   <span class="pill" id="svcPill">状态未知</span>
@@ -169,7 +170,7 @@ code{background:#0c1424;border:1px solid var(--line);border-radius:5px;padding:1
   </div>
   <div class="row" id="pasteWrap" style="margin:10px 0 0;display:none">
     <input id="pasteInput" placeholder="粘贴分享链接：hy2:// / vless:// / vmess:// / trojan:// / ss:// / tuic://" style="flex:1">
-    <button class="mini" onclick="applyPaste()">解析并保存</button>
+    
   </div>
   <div id="mPresets" class="row" style="margin:10px 0 0"></div>
   <div class="seg">
@@ -185,7 +186,7 @@ code{background:#0c1424;border:1px solid var(--line);border-radius:5px;padding:1
   </div>
   <textarea id="mJson" spellcheck="false" style="display:none"></textarea>
   <div class="toolbar">
-    <button class="primary" onclick="saveObj()">保存</button>
+    <button class="primary" id="btnSave" onclick="savePrimary()">保存</button>
     <button onclick="closeModal()">取消</button>
     <span class="meta" id="mNote"></span>
   </div>
@@ -1132,10 +1133,32 @@ function openPaste(){
   openNew('outbound');
   setTimeout(()=>{ const el = document.getElementById('pasteInput'); if(el) el.focus(); }, 80);
 }
+function savePrimary(){
+  const e = state.editing; if(!e) return;
+  const el = document.getElementById('pasteInput');
+  const boxVisible = document.getElementById('pasteWrap') &&
+                     getComputedStyle(document.getElementById('pasteWrap')).display !== 'none';
+  if(e.kind==='outbound' && boxVisible && el && el.value.trim()){
+    applyPaste();          // 粘贴框有内容 -> 先解析再保存
+    return;
+  }
+  saveObj();               // 否则按普通表单保存
+}
 function applyPaste(){
   const el = document.getElementById('pasteInput');
   const r = parseShare(el ? el.value : '');
   if(r.err){ toast(r.err,'bad'); return; }
+  // 必填校验：缺关键字段说明链接不完整，直接拒绝，别存半截节点
+  const NEED = { socks:['server','server_port'], http:['server','server_port'],
+                 hysteria2:['server','server_port','password'],
+                 tuic:['server','server_port','uuid','password'],
+                 anytls:['server','server_port','password'],
+                 vless:['server','server_port','uuid'], vmess:['server','server_port','uuid'],
+                 trojan:['server','server_port','password'],
+                 shadowsocks:['server','server_port','password'] };
+  const need = NEED[r.proto] || ['server','server_port'];
+  const miss = need.filter(k => !r.obj[k]);
+  if(miss.length){ toast('链接不完整，缺少：'+miss.join(', ')+'。请确认粘贴的是完整分享链接（含 账号@主机:端口）','bad'); return; }
   const e = state.editing; if(!e || e.kind!=='outbound') return;
   e.proto = r.proto;
   e.obj = r.obj;
@@ -1156,6 +1179,7 @@ function openNew(kind, proto){
   $('#mNote').textContent = '保存后记得点「配置检查」或直接热重载；坏配置会被 sing-box 拒绝并提示原因。';
   $('#mJson').value = '';
   const pw = document.getElementById('pasteWrap'); if(pw) pw.style.display = (kind==='outbound') ? 'flex' : 'none';
+  const bs = document.getElementById('btnSave'); if(bs) bs.textContent = (kind==='outbound') ? '解析并保存' : '保存';
   const pi = document.getElementById('pasteInput'); if(pi) pi.value = '';
   setSeg('form'); renderForm(); $('#modal').classList.add('on');
 }
@@ -1174,6 +1198,7 @@ async function openEdit(kind, tag){
   $('#mType').innerHTML = typeOptions(kind, proto);
   $('#mNote').textContent = '改 tag 会变成新增（旧 tag 需手动删）。协议类型切换会重置字段。';
   const pw2 = document.getElementById('pasteWrap'); if(pw2) pw2.style.display = 'none';
+  const bs2 = document.getElementById('btnSave'); if(bs2) bs2.textContent = '保存';
   resetSeg(); renderForm(); $('#modal').classList.add('on');
 }
 function switchType(proto){
@@ -1543,13 +1568,24 @@ async function saveObj(){
     Object.keys(data).forEach(k=>{ if(k===e.proto) delete data[k]; });
   }
   if(!data.tag){ toast('必须填 tag','bad'); return; }
+  // 出站代理类必须有 server，防止解析失败后把空壳 direct 写进配置
+  if(e.kind==='outbound' && !['direct','block'].includes(e.proto)){
+    if(!data.server){ toast('保存已拦截：'+e.proto+' 出站缺少服务器地址，请先粘贴节点或手动填写','bad'); return; }
+    if(!data.server_port){ toast('保存已拦截：'+e.proto+' 出站缺少端口','bad'); return; }
+  }
   // 友好提示：填了传输路径却没选传输方式
   const tr = data.transport;
   if(!tr && (getPath(e.obj,'transport.path') || getPath(e.obj,'transport.service_name'))){
     toast('提示：你填了传输路径/服务名但没选「传输方式」，已忽略这些传输设置（Reality 通常不需要传输方式）','ok');
   }
+  // 同名覆盖：新建时若 tag 已存在，按「编辑」处理，避免重复出站
+  let original = e.tag;
+  if(!original){
+    const list = ((state.config||{})[e.kind==='inbound'?'inbounds':'outbounds'])||[];
+    if(list.some(x=>x.tag===data.tag)) original = data.tag;
+  }
   try{
-    const r = await api('/api/object',{method:'POST',body:JSON.stringify({kind:e.kind, original:e.tag, data})});
+    const r = await api('/api/object',{method:'POST',body:JSON.stringify({kind:e.kind, original:original, data})});
     toast('已保存','ok'); afterWrite(r); closeModal(); loadConfig();
   }catch(err){
     // 后端写入前会做 sing-box check；失败时把完整原因贴出来，别只说“保存失败”
