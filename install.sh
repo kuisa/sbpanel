@@ -36,7 +36,7 @@ ENVF="/etc/sbpanel.env"
 BINDIR="/usr/local/bin"
 SB_BIN="/usr/local/bin/sing-box"
 # 自建文件站（OVH 托管，放裸二进制，不受 GitHub 单文件 25MB 上传限制）
-SB_MIRROR="${SB_MIRROR:-https://oracle-jp.0o0o.pp.ua}"
+SB_MIRROR="${SB_MIRROR:-https://free.us.kg}"
 SB_VER="1.12.12"
 NODE_DIR="/opt/sbpanel-node"
 USE_NODE=0
