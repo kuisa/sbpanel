@@ -75,17 +75,21 @@ systemctl restart sbpanel
 ```
 
 **方式三：Proot游戏机一键安装**
+
 Debian/Ubuntu:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/kuisa/sbpanel/main/proot-start-ubuntu.sh | sudo bash
 ```
+
 
 Apline:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/kuisa/sbpanel/main/proot-start.sh | sudo bash
 ```
 
+
 **注意：Proot启动方式必须用proot-start-ubuntu.sh或proot-start.sh nohup启动!!!!**
+
 
 **注意：前端 HTML 是 `go:embed` 编进二进制里的**，只替换 `panel.html` 对二进制版没有任何作用，
 必须换整个二进制文件；Node 版才是替换 `/opt/sbpanel-node/panel.html`。
