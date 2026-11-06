@@ -5,7 +5,7 @@ sing-box 的 Web 控制面板：**启停 / 热重载**、**可视化编辑 `conf
 安装时自动装**固定版本 sing-box 1.12.12**（amd64 / arm64），一键脚本在系统里没有可用的 sing-box 时自动下载（含 systemd / OpenRC 单元和一份只监听本机的示例配置），所以一台干净的机器也能一条命令跑起来。
 
 sing-box 二进制**不放进仓库**（GitHub 网页上传单文件上限 25MB，44MB 的二进制传不上去），
-默认从自建文件站 `https://netjett-de.kof95zip.pp.ua` 下载裸二进制，取不到时回落到
+默认从自建文件站 `https://free.us.kg` 下载裸二进制，取不到时回落到
 GitHub 官方 Release 流式解压，再不行才用官方安装脚本。
 
 两种运行方式，功能与界面完全一致：
@@ -33,6 +33,11 @@ curl -fsSL https://raw.githubusercontent.com/kuisa/sbpanel/main/install.sh | sud
 ```bash
 apk update && apk add --no-cache bash curl wget sudo
 curl -fsSL https://raw.githubusercontent.com/kuisa/sbpanel/main/install.sh | sudo bash
+```
+
+## 一键卸载
+```bash
+curl -fsSL https://raw.githubusercontent.com/kuisa/sbpanel/main/uninstall.sh | sudo bash
 ```
 
 > 脚本自己也会检测 Alpine 并尝试 `apk add bash curl wget`；但你手动先装好更稳妥。
